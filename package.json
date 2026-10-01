@@ -1,0 +1,17 @@
+{
+  "name": "recall",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": ["apps/web"],
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "setup": "npm install && uv sync --directory apps/api --locked",
+    "dev": "concurrently --kill-others --names web,api \"npm run dev:web\" \"npm run dev:api\"",
+    "dev:web": "npm run dev --workspace @recall/web",
+    "dev:api": "uv run --directory apps/api --locked uvicorn app.main:app --reload --host 127.0.0.1 --port 8000",
+    "build": "npm run build --workspace @recall/web",
+    "start:web": "npm run start --workspace @recall/web",
+    "start:api": "uv run --directory apps/api --locked uvicorn app.main:app --host 0.0.0.0 --port 8000"
+  },
+  "devDependencies": { "concurrently": "^9.2.1" }
+}

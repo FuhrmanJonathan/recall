@@ -1,5 +1,5 @@
 {
-  "name": "recall-app",
+  "name": "@recall/web",
   "version": "0.1.0",
   "private": true,
   "scripts": {
