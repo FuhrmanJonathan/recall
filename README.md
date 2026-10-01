@@ -10,9 +10,6 @@ npm run setup
 npm run dev
 ```
 
-The frontend runs on http://localhost:3000 and the backend on
-http://127.0.0.1:8000. Ctrl+C stops both.
-
 Add backend routes in `apps/api/app/main.py`. Frontend requests to `/api/*`
 are forwarded to the backend. To change its URL, set `API_URL` in
 `apps/web/.env.local` before starting or building the frontend.
