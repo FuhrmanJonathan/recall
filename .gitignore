@@ -13,4 +13,6 @@ __pycache__/
 !.env.example
 .DS_Store
 *.log
+*.db
+*.sqlite3
 .vercel/
