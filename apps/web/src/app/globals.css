@@ -1,15 +1,26 @@
 @import 'tailwindcss';
-
-h1 {
-  color: white;
-  font-size: 50px;
+header {/*for the recall sign*/
+  color:white;
   background-color: steelblue;
   text-align: left;
-  font-weight: 600;
+  font-size: 20px;
+
+  /* className="flex items-left justify-between bg-[steelblue] px-6 py-3" */
+}
+h1 { 
+  color: black;
+  text-align: left;
+  font-size: 20px;
+}
+h2 {
+  color: black;
+  font-size: 30px;
+  text-align: left;
   
 }
 body {
   padding: 20px 20px 20px;
+  /* background-color: white; */
   font-family: Arial, Helvetica, sans-serif;
   margin: 0 auto;
 }

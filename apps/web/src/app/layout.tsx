@@ -1,32 +1,29 @@
 import type { Metadata } from "next";
+import Link from "next/link";
+import MenuButton from "@/components/menubutton";
 import "./globals.css";
+import Image from "next/image";
 
 export const metadata: Metadata = {
   title: "Recall",
 };
-export default function RootLayout({ children }: LayoutProps<"/">) {
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="en">
-      {/* <img>id="logo" src="img.png" width=1px height= 1px</img> */}
-      <h1>Recall</h1>
-      <body>{children}</body>
+      <body>
+        <header>
+          {/* <Image src="/logo.png" alt="Recall logo" width={40} height={40} /> */}
+          <Link href="/">Recall</Link>
+          
+          <MenuButton />
+        </header>
+        {children}
+      </body>
     </html>
   );
 }
-
-// export default function DashboardLayout({
-//   children,
-// }: {
-//   children: React.ReactNode
-// }) {
-//   return (
-//     <html lang="en">
-//       <body>
-//         <h1 style="color:white">Recall</h1>
-//         {/* Layout UI */}
-//         {/* Place children where you want to render a page or nested layout */}
-//         <main>{children}</main>
-//       </body>
-//     </html>
-//   )
-// }
