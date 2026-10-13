@@ -1,14 +1,23 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException, UploadFile
 from pydantic import BaseModel
 
+from app.config import MAX_TEXT_CHARS, MAX_UPLOAD_BYTES
+from app.generate import router as flashcards_router
 from app.text import clean_text, split_into_chunks
-
-MAX_TEXT_CHARS = 50_000
-MAX_UPLOAD_BYTES = 1_000_000
-
-app = FastAPI(title="Recall API")
+from recall_db.database import create_tables
 
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    create_tables()
+    yield
+
+
+app = FastAPI(title="Recall API", lifespan=lifespan)
+app.include_router(flashcards_router)
 class TextIn(BaseModel):
     text: str
 
