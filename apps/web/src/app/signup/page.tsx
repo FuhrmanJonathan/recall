@@ -1,63 +1,66 @@
 "use client";
 import { useState } from "react";
-import {useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useAuth } from "@/components/auth";
+import AuthCard, { inputClass, submitClass } from "@/components/authcard";
 
 export default function SignUpPage() {
   const router = useRouter();
-  const params = useSearchParams();
+  const { refresh } = useAuth();
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  async function onSubmit(e: React.SubmitEvent<HTMLFormElement>) {
+  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError("");
+    setBusy(true);
     const form = new FormData(e.currentTarget);
 
-    const res = await fetch("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email: form.get("email"),
-        password: form.get("password"),
-      }),
-    });
+    try {
+      const res = await fetch("/api/auth/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: form.get("email"),
+          password: form.get("password"),
+        }),
+      });
 
-    if (res.ok) {
-      router.push("/dashboard");   // backend already logged them in
-      router.refresh();
-    } else if (res.status === 409) {
-      router.push("/login?exists=1");   // already registered
-    } else if (res.status === 422) {
-      setError("Enter a valid email and a password of at least 5 characters.");
-    } else {
-      setError("Something went wrong. Please try again.");
+      if (res.ok) {
+        await refresh();               // backend already logged them in
+        router.push("/dashboard");
+      } else if (res.status === 409) {
+        router.push("/login?exists=1"); // already registered
+      } else if (res.status === 422) {
+        setError("Enter a valid email and a password of at least 5 characters.");
+      } else {
+        setError("Something went wrong. Please try again.");
+      }
+    } catch {
+      setError("Couldn't reach the server. Please try again.");
+    } finally {
+      setBusy(false);
     }
   }
 
   return (
-    <main className="mx-auto max-w-sm p-6">
-      <h2 className="mb-4 text-2xl font-semibold">Sign up</h2>
-      {params.get("exists") && (
-        <p className="mb-3 rounded bg-yellow-100 p-2 text-black">
-          That email already has an account. Please log in.
-        </p>
-      )}
+    <AuthCard title="Create your account" subtitle="Start turning your notes into flashcards.">
       <form onSubmit={onSubmit} className="flex flex-col gap-3">
         <input name="email" type="email" required autoComplete="email"
-               placeholder="Email" className="rounded border p-2" />
+               placeholder="Email" className={inputClass} />
         <input name="password" type="password" required minLength={5}
                autoComplete="new-password"
-               placeholder="Password (5+ characters)" className="rounded border p-2" />
-        <button type="submit" className="rounded bg-blue-600 p-2 text-white">
-          Sign up
+               placeholder="Password (5+ characters)" className={inputClass} />
+        <button type="submit" disabled={busy} className={submitClass}>
+          {busy ? "Creating account…" : "Sign up"}
         </button>
-        {error && <p className="text-red-600">{error}</p>}
+        {error && <p className="text-sm text-red-600">{error}</p>}
       </form>
-
-      <p className="mt-4 text-sm">
+      <p className="mt-6 text-sm text-ink/70">
         Already have an account?{" "}
-        <Link href="/login" className="underline">Log in</Link>
+        <Link href="/login" className="font-medium text-accent underline underline-offset-2">Log in</Link>
       </p>
-    </main>
+    </AuthCard>
   );
 }
