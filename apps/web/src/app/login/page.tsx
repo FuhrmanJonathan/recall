@@ -12,7 +12,8 @@ function LoginForm() {
     setError("");
     const form = new FormData(e.currentTarget);
 
-    const res = await fetch("/api/auth/login", {
+    // slides said /api/auth/login, though it looks like api/app/auth.py?
+    const res = await fetch("/api/auth/login", { 
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({
