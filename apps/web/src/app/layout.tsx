@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
-import Link from "next/link";
-import MenuButton from "@/components/menubutton";
+import { AuthProvider } from "@/components/auth";
+import Navbar from "@/components/navbar";
 import "./globals.css";
-import Image from "next/image";
 
 export const metadata: Metadata = {
   title: "Recall",
@@ -16,13 +15,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <header>
-          {/* <Image src="/logo.png" alt="Recall logo" width={40} height={40} /> */}
-          <Link href="/">Recall</Link>
-          
-          <MenuButton />
-        </header>
-        {children}
+        <AuthProvider>
+          <Navbar />
+          <main className="mx-auto max-w-5xl px-4 py-10 sm:px-6">{children}</main>
+        </AuthProvider>
       </body>
     </html>
   );
