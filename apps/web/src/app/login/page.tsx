@@ -1,52 +1,72 @@
 "use client";
 import { Suspense, useState } from "react";
-import { useRouter} from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { useAuth } from "@/components/auth";
+import AuthCard, { inputClass, submitClass } from "@/components/authcard";
 
 function LoginForm() {
   const router = useRouter();
+  const params = useSearchParams();
+  const { refresh } = useAuth();
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  async function onSubmit(e: React.SubmitEvent<HTMLFormElement>) {
+  // Only follow same-site paths like /cards.
+  const next = params.get("next");
+  const destination = next && next.startsWith("/") && !next.startsWith("//") ? next : "/dashboard";
+
+  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError("");
+    setBusy(true);
     const form = new FormData(e.currentTarget);
 
-    const res = await fetch("/api/auth/login", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({
-        email: form.get("email"),
-        password: form.get("password"),
-      }),
-    });
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: form.get("email"),
+          password: form.get("password"),
+        }),
+      });
 
-    if (res.ok) {
-      router.push("/dashboard");
-      router.refresh();
-    } else {
-      setError("Invalid email or password");
+      if (res.ok) {
+        await refresh();
+        router.push(destination);
+      } else {
+        setError("Invalid email or password.");
+      }
+    } catch {
+      setError("Couldn't reach the server. Please try again.");
+    } finally {
+      setBusy(false);
     }
   }
+
   return (
-    <main className="mx-auto max-w-sm p-6">
-      <h2 className="mb-4 text-2xl font-semibold">Log in</h2>
+    <AuthCard title="Log in" subtitle="Welcome back. Pick up where you left off.">
+      {params.get("exists") && (
+        <p className="mb-4 rounded-md bg-amber-100/60 p-3 text-sm text-amber-900">
+          That email already has an account. Please log in.
+        </p>
+      )}
       <form onSubmit={onSubmit} className="flex flex-col gap-3">
         <input name="email" type="email" required autoComplete="email"
-               placeholder="Email" className="rounded border p-2" />
+               placeholder="Email" className={inputClass} />
         <input name="password" type="password" required autoComplete="current-password"
-               placeholder="Password" className="rounded border p-2" />
-        <button type="submit" className="rounded bg-blue-600 p-2 text-white">
-          Log in
+               placeholder="Password" className={inputClass} />
+        <button type="submit" disabled={busy} className={submitClass}>
+          {busy ? "Logging in…" : "Log in"}
         </button>
-        {error && <p className="text-red-600">{error}</p>}
+        {error && <p className="text-sm text-red-600">{error}</p>}
       </form>
-      {/* signup button */}
-      <p className="mt-4 text-sm">
+      <p className="mt-6 text-sm text-ink/70">
         No account?{" "}
-        <Link href="/signup" className="underline">Sign up</Link>
+        <Link href="/signup" className="font-medium text-accent underline underline-offset-2">Sign up</Link>
       </p>
-    </main>
+    </AuthCard>
   );
 }
 
