@@ -4,7 +4,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from recall_db.database import Base, create_database_engine
-from recall_db.models import Deck, Flashcard, User
+from recall_db.models import AuthSession, Deck, Flashcard, User
 
 
 @pytest.fixture()
@@ -66,3 +66,26 @@ def test_deleting_user_cascades_to_decks_and_flashcards(session: Session):
 
     assert session.scalars(select(Deck)).all() == []
     assert session.scalars(select(Flashcard)).all() == []
+
+
+def test_auth_session_requires_an_existing_user(session: Session):
+    session.add(AuthSession(token_hash="a" * 64, user_id=999, expires_at=2_000_000_000))
+
+    with pytest.raises(IntegrityError):
+        session.commit()
+
+
+def test_deleting_user_cascades_to_auth_sessions(session: Session):
+    user = User(email="sessions@example.com", password_hash="hashed-password")
+    user.sessions.append(AuthSession(token_hash="a" * 64, expires_at=2_000_000_000))
+    session.add(user)
+    session.commit()
+
+    stored_session = session.get(AuthSession, "a" * 64)
+    assert stored_session is not None
+    assert stored_session.user.email == "sessions@example.com"
+
+    session.delete(user)
+    session.commit()
+
+    assert session.scalars(select(AuthSession)).all() == []

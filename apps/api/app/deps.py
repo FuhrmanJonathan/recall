@@ -1,13 +1,13 @@
-
+import time
 from collections.abc import Iterator
 
-from fastapi import Depends
+from fastapi import Cookie, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from recall_db.database import SessionLocal
-from recall_db.init_db import SAMPLE_EMAIL
-from recall_db.models import User
+from app.security import COOKIE_NAME, token_digest
+from recall_db.models import AuthSession, User
 
 
 def get_session() -> Iterator[Session]:
@@ -16,15 +16,19 @@ def get_session() -> Iterator[Session]:
         yield session
 
 
-def get_current_user(session: Session = Depends(get_session)) -> User:
-    """Placeholder until login exists: everything belongs to the sample user from init_db.
-
-    Replace this with real authentication later; the rest of the code only
-    depends on getting a User back.
-    """
-    user = session.scalar(select(User).where(User.email == SAMPLE_EMAIL))
+def get_current_user(
+    session: Session = Depends(get_session),
+    token: str | None = Cookie(default=None, alias=COOKIE_NAME),
+) -> User:
+    """Resolve a user from a persisted, unexpired login session."""
+    if not token:
+        raise HTTPException(401, "Please log in.")
+    user = session.scalar(
+        select(User).join(AuthSession).where(
+            AuthSession.token_hash == token_digest(token),
+            AuthSession.expires_at > int(time.time()),
+        )
+    )
     if user is None:
-        user = User(email=SAMPLE_EMAIL, password_hash="placeholder")
-        session.add(user)
-        session.commit()
+        raise HTTPException(401, "Please log in.")
     return user

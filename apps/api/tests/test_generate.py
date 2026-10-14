@@ -6,13 +6,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import flashcards, generate
+from app import flashcards, generate, main
 from app.deps import get_session
 from app.documents import SourceKind, detect_source_kind
 from app.flashcards import CardDraft, CardSet
 from app.main import app
 from app.ocr import OCRUnavailableError
-from recall_db.database import Base, create_database_engine
+from recall_db.database import Base, create_database_engine, create_tables
 from recall_db.models import Deck, Flashcard, User
 
 CARDS = [
@@ -30,14 +30,23 @@ def engine(tmp_path):
 
 
 @pytest.fixture()
-def client(engine):
+def client(engine, monkeypatch):
     def override_session():
         with Session(engine) as session:
             yield session
 
     app.dependency_overrides[get_session] = override_session
-    yield TestClient(app)  # not used as a context manager, so the real DB isn't created
-    app.dependency_overrides.clear()
+    monkeypatch.setattr(main, "create_tables", lambda: create_tables(engine))
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/auth/signup",
+                json={"email": "student@example.com", "password": "study-password"},
+            )
+            assert response.status_code == 201
+            yield client
+    finally:
+        app.dependency_overrides.clear()
 
 
 def test_detect_source_kind():
@@ -71,7 +80,7 @@ def test_text_upload_saves_deck(client, engine, monkeypatch):
     with Session(engine) as session:
         deck = session.scalar(select(Deck))
         assert len(deck.flashcards) == 2
-        assert deck.owner.email == "1234@recall.local"
+        assert deck.owner.email == "student@example.com"
 
     assert client.get(f"/api/decks/{body['id']}").json()["title"] == "bio"
     assert client.get("/api/decks/999").status_code == 404

@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, UploadFile
 from pydantic import BaseModel
 
+from app.auth import router as auth_router
 from app.config import MAX_TEXT_CHARS, MAX_UPLOAD_BYTES
 from app.generate import router as flashcards_router
 from app.text import clean_text, split_into_chunks
@@ -17,7 +18,10 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="Recall API", lifespan=lifespan)
+app.include_router(auth_router)
 app.include_router(flashcards_router)
+
+
 class TextIn(BaseModel):
     text: str
 

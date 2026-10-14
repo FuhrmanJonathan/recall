@@ -22,6 +22,21 @@ class User(TimestampMixin, Base):
     decks: Mapped[list["Deck"]] = relationship(
         back_populates="owner", cascade="all, delete-orphan"
     )
+    sessions: Mapped[list["AuthSession"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+
+
+class AuthSession(TimestampMixin, Base):
+    __tablename__ = "auth_sessions"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    expires_at: Mapped[int] = mapped_column(index=True)
+
+    user: Mapped[User] = relationship(back_populates="sessions")
 
 
 class Deck(TimestampMixin, Base):
