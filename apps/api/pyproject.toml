@@ -11,6 +11,8 @@ dependencies = [
     "pwdlib[argon2]>=0.3.1",
     "recall-database",
     "uvicorn>=0.34,<1.0",
+    "tzdata>=2026.5",
+    "resend>=2.49.1",
 ]
 
 [project.optional-dependencies]
