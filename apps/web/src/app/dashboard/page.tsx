@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { RequireAuth, useAuth } from "@/components/auth";
 import { Card, btnPrimary } from "@/components/ui";
@@ -12,14 +12,6 @@ const stats = [
 ];
 
 
-// Temporary sample data until we connect the backend
-const sampleCounts = [
-  0, 5, 12, 30, 50, 0, 8,
-  15, 25, 40, 0, 10, 20, 55,
-  0, 3, 18, 35, 60, 12, 0,
-  7, 22, 45, 10, 0, 30, 50,
-];
-
 function getColor(count: number): string {
   if (count === 0) return "#e5e7eb";
   if (count <= 10) return "#C4D9E8";
@@ -27,8 +19,35 @@ function getColor(count: number): string {
   if (count <= 50) return "#4682B4";
   return "#254F75";
 }
+type Activity = {
+  date: string;
+  cards_reviewed: number;
+};
 
 function HeatMap() {
+  const [activities, setActivities] = useState<Activity[]>([]);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    async function loadActivity() {
+      try {
+        const response = await fetch("/api/activity", {
+          credentials: "include",
+        });
+
+        if (!response.ok) {
+          throw new Error("Failed to load activity");
+        }
+
+        const data: Activity[] = await response.json();
+        setActivities(data);
+      } catch {
+        setError("Could not load study activity.");
+      }
+    }
+
+    loadActivity();
+}, []);
   const [month, setMonth] = useState(
     new Date(new Date().getFullYear(), new Date().getMonth(), 1)
   );
@@ -47,10 +66,8 @@ function HeatMap() {
     ));
   }
   return (
-    <main style={{ padding: "30px" }}>
-      <h2>Dashboard</h2>
-      <h3 style={{ marginTop: "30px" }}>Study Activity</h3>
-
+   <Card className="mt-6 p-5">
+    <h2 className="font-semibold">Study Activity</h2>
       <div style={{ display: "flex", gap: "20px", margin: "20px 0" }}>
         <button onClick={() => changeMonth(-1)}>←</button>
 
@@ -88,9 +105,15 @@ function HeatMap() {
         ))}
 
         {Array.from({ length: daysInMonth }, (_, i) => {
-          const count = sampleCounts[
-            (i + month.getMonth()) % sampleCounts.length
-          ];
+        const date = [
+          month.getFullYear(),
+          String(month.getMonth() + 1).padStart(2, "0"),
+          String(i + 1).padStart(2, "0"),
+        ].join("-");
+
+        const count =
+          activities.find((activity) => activity.date === date)
+            ?.cards_reviewed ?? 0;
 
           return (
             <div
@@ -112,7 +135,7 @@ function HeatMap() {
           );
         })}
       </div>
-    </main>
+    </Card>
   );
 }
 
@@ -167,6 +190,5 @@ export default function DashboardPage() {
   return (
     <RequireAuth>
       <Dashboard />
-    </RequireAuth>
   );
 }

@@ -19,7 +19,7 @@ def send_reminder_email(to_email: str):
         "to": [to_email],
         "subject": "Recall: Time to Study!",
         "html": """
-            <h2>Hey!</h2>
+            Hey!
             <p>Just a quick reminder to review your flashcards today. Happy Studying!</p>
          
         """,
