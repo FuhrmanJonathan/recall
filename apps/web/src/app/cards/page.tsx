@@ -32,12 +32,16 @@ function Study() {
         if (!decksRes.ok) throw new Error("Could not load decks");
         const decks = await decksRes.json();
 
-        if (decks.length) {
-          const deckRes = await fetch(`${API}/decks/${decks[0].id}`, { credentials: "include" });
+        const selectedId = new URLSearchParams(window.location.search).get("deck");
+        const selectedDeck = selectedId ? decks.find((deck: { id: number }) => String(deck.id) === selectedId) : decks[0];
+        if (selectedId && !selectedDeck) throw new Error("Deck not found");
+
+        if (selectedDeck) {
+          const deckRes = await fetch(`${API}/decks/${selectedDeck.id}`, { credentials: "include" });
           if (!deckRes.ok) throw new Error("Could not load deck");
           const deck = await deckRes.json();
           setTitle(deck.title);
-          setCards(deck.cards);
+          setCards(deck.flashcards);
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : "Something went wrong");

@@ -36,10 +36,10 @@ function Dashboard() {
         <Card className="p-5 lg:col-span-2">
           <h2 className="font-semibold">Your decks</h2>
           <div className="mt-4 rounded-lg border border-dashed border-gray-300 p-8 text-center">
-            <p className="text-sm font-medium">No decks yet</p>
-            <p className="mt-1 text-sm text-gray-500">Decks made from your notes will show up here.</p>
-            <Link href="/cards" className="mt-4 inline-block text-sm font-medium text-accent hover:underline">
-              Try the sample deck
+            <p className="text-sm font-medium">Your study library</p>
+            <p className="mt-1 text-sm text-gray-500">Find your saved decks or upload notes to your library.</p>
+            <Link href="/decks" className="mt-4 inline-block text-sm font-medium text-accent hover:underline">
+              Browse your decks
             </Link>
           </div>
         </Card>

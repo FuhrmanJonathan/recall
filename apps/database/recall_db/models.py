@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, String, Text, func
+from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, LargeBinary, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from recall_db.database import Base
@@ -99,3 +99,17 @@ class CardReviewState(Base):
 
     # Reject concurrent updates based on the same old state.
     __mapper_args__ = {"version_id_col": version}
+
+
+class NoteUpload(TimestampMixin, Base):
+    """Original notes saved without invoking OCR or flashcard generation."""
+
+    __tablename__ = "note_uploads"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    title: Mapped[str] = mapped_column(String(200))
+    filename: Mapped[str] = mapped_column(String(255))
+    data: Mapped[bytes] = mapped_column(LargeBinary)
