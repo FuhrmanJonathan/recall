@@ -62,3 +62,13 @@ class Flashcard(TimestampMixin, Base):
     answer: Mapped[str] = mapped_column(Text)
 
     deck: Mapped[Deck] = relationship(back_populates="flashcards")
+
+class Review(TimestampMixin, Base):
+    __tablename__ = "reviews"
+    
+    id: Mapped[int] = mapped_column(primary_key=True)
+    flashcard_id: Mapped[int] = mapped_column(
+        ForeignKey("flashcards.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    rating: Mapped[str] = mapped_column(String(10))  # Again/Hard/Good/Easy
