@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from app.auth import router as auth_router
 from app.config import MAX_TEXT_CHARS, MAX_UPLOAD_BYTES
 from app.generate import router as flashcards_router
+from app.reviews import router as reviews_router
 from app.text import clean_text, split_into_chunks
 from recall_db.database import create_tables
 
@@ -20,6 +21,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="Recall API", lifespan=lifespan)
 app.include_router(auth_router)
 app.include_router(flashcards_router)
+app.include_router(reviews_router)
 
 
 class TextIn(BaseModel):
