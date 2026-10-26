@@ -1,12 +1,30 @@
 @import 'tailwindcss';
 
 @theme {
-  --color-ink: #111827;
-  --color-accent: #2563eb;
-  --color-accent-dark: #1d4ed8;
+  --color-ink: #182336;
+  --color-gray-400: #6b7688;
+  --color-gray-500: #596578;
+  --color-gray-600: #48556a;
+  --color-gray-700: #344158;
+  --color-accent: #3159d6;
+  --color-accent-dark: #2447b4;
 }
 
 body {
   @apply bg-gray-50 text-ink antialiased;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+body { background-color: #f7f8fa; line-height: 1.6; }
+input, textarea, select { line-height: 1.6; }
+textarea { font-size: 1.125rem; }
+input::placeholder, textarea::placeholder { color: #657187; opacity: 1; }
+button:not(:disabled), a, select, input[type="checkbox"] { cursor: pointer; }
+:where(a, button, input, textarea, select):focus-visible {
+  outline: 3px solid #93b4ff;
+  outline-offset: 3px;
+}
+::selection { background: #dbeafe; color: #172554; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
