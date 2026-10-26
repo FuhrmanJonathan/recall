@@ -74,6 +74,17 @@ class Review(TimestampMixin, Base):
     rating: Mapped[str] = mapped_column(String(10))  # Again/Hard/Good/Easy
 
 
+class CardLabel(Base):
+    """Normalized labels attached to cards; ownership follows the card's deck."""
+
+    __tablename__ = "card_labels"
+
+    flashcard_id: Mapped[int] = mapped_column(
+        ForeignKey("flashcards.id", ondelete="CASCADE"), primary_key=True
+    )
+    name: Mapped[str] = mapped_column(String(40), primary_key=True, index=True)
+
+
 class CardReviewState(Base):
     """Current scheduling state, separate from the append-only review history."""
 
