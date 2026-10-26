@@ -1,6 +1,8 @@
-from datetime import datetime
+from datetime import date, datetime, time
 
-from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, LargeBinary, String, Text, func
+from sqlalchemy import (CheckConstraint, Date, DateTime, Float, ForeignKey, Integer,
+    LargeBinary, String, Text, Time, UniqueConstraint, func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from recall_db.database import Base
@@ -65,9 +67,56 @@ class Flashcard(TimestampMixin, Base):
 
     deck: Mapped[Deck] = relationship(back_populates="flashcards")
 
+
+class StudyActivity(Base):
+    __tablename__ = "study_activity"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True
+    )
+
+    study_date: Mapped[date] = mapped_column(
+        Date, nullable=False
+    )
+
+    cards_reviewed: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "study_date"),
+    )
+
+
+class ReminderPreference(Base):
+    __tablename__ = "reminder_preferences"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        unique=True,
+        index=True
+    )
+
+    reminder_type: Mapped[str] = mapped_column(
+        String(20), default="none"
+    )
+
+    reminder_time: Mapped[time] = mapped_column(Time)
+
+    timezone: Mapped[str] = mapped_column(
+        String(50), default="America/New_York"
+    )
+
+    scheduled_days: Mapped[str] = mapped_column(
+        String(30), default=""
+    )
 class Review(TimestampMixin, Base):
     __tablename__ = "reviews"
-    
     id: Mapped[int] = mapped_column(primary_key=True)
     flashcard_id: Mapped[int] = mapped_column(
         ForeignKey("flashcards.id", ondelete="CASCADE"), index=True)

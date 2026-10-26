@@ -12,7 +12,7 @@ from app import main, reviews
 from app.deps import get_session
 from app.security import COOKIE_NAME, token_digest
 from recall_db.database import Base, create_database_engine, create_tables
-from recall_db.models import AuthSession, CardReviewState, Deck, Flashcard, Review, User
+from recall_db.models import AuthSession, CardReviewState, Deck, Flashcard, Review, StudyActivity, User
 
 
 START = datetime(2026, 10, 19, 12, tzinfo=timezone.utc)
@@ -84,6 +84,13 @@ def test_full_sequence_reads_persisted_state_and_records_history(setup, monkeypa
             assert (state.repetitions, state.interval_days, state.ease_factor) == (reps, interval, ease)
             history = session.scalars(select(Review).order_by(Review.id)).all()
             assert len(history) == index
+            activity = session.scalar(select(StudyActivity).where(
+                StudyActivity.user_id == owner,
+                StudyActivity.study_date == now.date(),
+            ))
+            assert activity is not None
+            # One daily total for each UTC date touched by the review sequence.
+            assert activity.cards_reviewed == 1
             assert history[-1].rating == rating
             assert history[-1].id == body["review_id"]
             assert reviews._stored_utc(history[-1].created_at) == now
@@ -132,6 +139,9 @@ def test_duplicate_and_early_reviews_do_not_advance(setup, monkeypatch):
     with Session(engine) as session:
         assert session.get(CardReviewState, (owner, card_id)).repetitions == 1
         assert len(session.scalars(select(Review)).all()) == 1
+        assert session.scalar(select(StudyActivity).where(
+            StudyActivity.user_id == owner,
+        )).cards_reviewed == 1
 
 
 def test_overdue_review_starts_at_actual_time(setup, monkeypatch):

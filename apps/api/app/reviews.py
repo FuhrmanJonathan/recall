@@ -12,7 +12,7 @@ from sqlalchemy.orm.exc import StaleDataError
 
 from app.deps import get_current_user, get_session
 from app.sm2 import ReviewState, review_rating
-from recall_db.models import CardReviewState, Deck, Flashcard, Review, User
+from recall_db.models import CardReviewState, Deck, Flashcard, Review, StudyActivity, User
 
 router = APIRouter(prefix="/api", tags=["reviews"])
 
@@ -97,6 +97,21 @@ def submit_review(
         user_id=user.id, flashcard_id=card.id, rating=body.rating, created_at=now
     )
     session.add(event)
+    # Record review in the same transaction as the
+    # review history and SM-2 state. 
+    with session.no_autoflush:
+        activity = session.scalar(
+            select(StudyActivity).where(
+                StudyActivity.user_id == user.id,
+                StudyActivity.study_date == now.date(),
+        )
+    )
+    if activity is None:
+        session.add(StudyActivity(
+            user_id=user.id, study_date=now.date(), cards_reviewed=1,
+        ))
+    else:
+        activity.cards_reviewed += 1
     try:
         session.flush()
         response = ReviewOut(
