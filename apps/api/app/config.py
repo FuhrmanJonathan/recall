@@ -24,3 +24,7 @@ MAX_CONCURRENT_REQUESTS = 4
 
 # --- OCR ---
 OCR_MODEL_ID = os.getenv("OCR_MODEL_ID", "stepfun-ai/GOT-OCR-2.0-hf")
+
+# --- Flashcard generation ---
+# Optional "what should this deck focus on?" text from the student.
+MAX_FOCUS_CHARS = 300

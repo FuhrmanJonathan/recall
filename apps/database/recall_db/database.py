@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from sqlalchemy import Engine, create_engine, event
+from sqlalchemy import Engine, create_engine, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 
@@ -40,3 +40,25 @@ def create_tables(target_engine: Engine = engine) -> None:
     from recall_db import models  # noqa: F401
 
     Base.metadata.create_all(target_engine)
+    _add_missing_columns(target_engine)
+
+
+# create_all() never alters tables that already exist, so columns added after the
+# first release are added here for databases created before them (SQLite only).
+_ADDED_COLUMNS: dict[str, dict[str, str]] = {
+    "flashcards": {"needs_review": "BOOLEAN NOT NULL DEFAULT 0"},
+}
+
+
+def _add_missing_columns(target_engine: Engine) -> None:
+    if target_engine.dialect.name != "sqlite":
+        return
+    inspector = inspect(target_engine)
+    with target_engine.begin() as connection:
+        for table, columns in _ADDED_COLUMNS.items():
+            if not inspector.has_table(table):
+                continue
+            existing = {column["name"] for column in inspector.get_columns(table)}
+            for name, ddl in columns.items():
+                if name not in existing:
+                    connection.execute(text(f'ALTER TABLE "{table}" ADD COLUMN "{name}" {ddl}'))

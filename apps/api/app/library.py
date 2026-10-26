@@ -6,7 +6,7 @@ from pathlib import PurePath
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.deps import get_current_user, get_session
@@ -21,6 +21,7 @@ class LibraryItem(BaseModel):
     title: str
     created_at: datetime
     card_count: int = 0
+    flagged_count: int = 0  # cards flagged "needs review"
 
 
 @router.get("/decks", response_model=list[LibraryItem])
@@ -29,7 +30,13 @@ def list_decks(
     user: User = Depends(get_current_user),
 ):
     rows = session.execute(
-        select(Deck.id, Deck.title, Deck.created_at, func.count(Flashcard.id).label("card_count"))
+        select(
+            Deck.id, Deck.title, Deck.created_at,
+            func.count(Flashcard.id).label("card_count"),
+            func.coalesce(
+                func.sum(case((Flashcard.needs_review.is_(True), 1), else_=0)), 0
+            ).label("flagged_count"),
+        )
         .outerjoin(Flashcard).where(Deck.user_id == user.id)
         .group_by(Deck.id).order_by(Deck.created_at.desc(), Deck.id.desc())
     )

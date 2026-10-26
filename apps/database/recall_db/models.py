@@ -60,6 +60,8 @@ class Flashcard(TimestampMixin, Base):
         ForeignKey("decks.id", ondelete="CASCADE"), index=True)
     question: Mapped[str] = mapped_column(Text)
     answer: Mapped[str] = mapped_column(Text)
+    # Set when OCR / generation was unsure about this card; cleared once the student edits it.
+    needs_review: Mapped[bool] = mapped_column(default=False, server_default="0")
 
     deck: Mapped[Deck] = relationship(back_populates="flashcards")
 
