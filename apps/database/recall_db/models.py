@@ -1,6 +1,8 @@
 from datetime import date, datetime, time
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func, Time
+from sqlalchemy import (CheckConstraint, Date, DateTime, Float, ForeignKey, Integer,
+    LargeBinary, String, Text, Time, UniqueConstraint, func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from recall_db.database import Base
@@ -111,3 +113,63 @@ class ReminderPreference(Base):
     scheduled_days: Mapped[str] = mapped_column(
         String(30), default=""
     )
+class Review(TimestampMixin, Base):
+    __tablename__ = "reviews"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    flashcard_id: Mapped[int] = mapped_column(
+        ForeignKey("flashcards.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    rating: Mapped[str] = mapped_column(String(10))  # Again/Hard/Good/Easy
+
+
+class CardLabel(Base):
+    """Normalized labels attached to cards; ownership follows the card's deck."""
+
+    __tablename__ = "card_labels"
+
+    flashcard_id: Mapped[int] = mapped_column(
+        ForeignKey("flashcards.id", ondelete="CASCADE"), primary_key=True
+    )
+    name: Mapped[str] = mapped_column(String(40), primary_key=True, index=True)
+
+
+class CardReviewState(Base):
+    """Current scheduling state, separate from the append-only review history."""
+
+    __tablename__ = "card_review_states"
+    __table_args__ = (
+        CheckConstraint("repetitions >= 0"),
+        CheckConstraint("interval_days >= 0"),
+        CheckConstraint("ease_factor >= 1.3"),
+    )
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    flashcard_id: Mapped[int] = mapped_column(
+        ForeignKey("flashcards.id", ondelete="CASCADE"), primary_key=True
+    )
+    repetitions: Mapped[int] = mapped_column(default=0)
+    interval_days: Mapped[int] = mapped_column(default=0)
+    ease_factor: Mapped[float] = mapped_column(Float, default=2.5)
+    last_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    version: Mapped[int] = mapped_column(default=1)
+
+    # Reject concurrent updates based on the same old state.
+    __mapper_args__ = {"version_id_col": version}
+
+
+class NoteUpload(TimestampMixin, Base):
+    """Original notes saved without invoking OCR or flashcard generation."""
+
+    __tablename__ = "note_uploads"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    title: Mapped[str] = mapped_column(String(200))
+    filename: Mapped[str] = mapped_column(String(255))
+    data: Mapped[bytes] = mapped_column(LargeBinary)

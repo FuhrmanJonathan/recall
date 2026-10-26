@@ -7,6 +7,7 @@ import { Wordmark } from "@/components/ui";
 
 const appLinks = [
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/decks", label: "My Decks" },
   { href: "/cards", label: "Cards" },
   { href: "/schedule", label: "Schedule" },
 ];
@@ -31,13 +32,13 @@ export default function Navbar() {
 
   return (
     <header className="border-b border-gray-200 bg-white">
-      <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
+      <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-2 px-4 py-3 sm:px-6">
         <Link href={user ? "/dashboard" : "/"} className="shrink-0">
           <Wordmark />
         </Link>
 
         {!loading && (
-          <nav className="flex items-center gap-1 text-sm">
+          <nav className="flex flex-wrap items-center gap-1 text-sm">
             {user ? (
               <>
                 {appLinks.map((link) => (
