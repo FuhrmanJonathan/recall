@@ -1,0 +1,109 @@
+  /* ---------- Yogo animation: approved reference ----------
+     Every animated group sits inside a translate() to its pivot point, so
+     rotating or scaling about the local origin works the same in every browser. */
+  .yogo { display: block; overflow: visible; }
+  .fig, .sway, .lean, .blink, .blink2, .glance, .card, .wave, .rest, .spark { transform-box: view-box; transform-origin: 0 0; }
+  .yogo .rest, .yogo .lines { opacity: 0; }
+
+  /* Idle: slow bob, blinks on two uneven timers, an occasional glance */
+  .idle .fig { animation: y-bob 4s ease-in-out infinite; }
+  .idle .blink { animation: y-blink 4.3s linear 0.6s infinite; }
+  .idle .blink2 { animation: y-blink 7.1s linear 2.9s infinite; }
+  .idle .glance { animation: y-look 9s ease-in-out 3s infinite; }
+
+  /* Thinking: reads the card line by line, looks up, repeats. The dots double as a loading indicator. */
+  .thinking .glance { animation: y-read 5s ease-in-out infinite; }
+  .thinking .blink { animation: y-blink 5.7s linear 3.9s infinite; }
+  .thinking .card { animation: y-turn 5s ease-in-out infinite; }
+  .thinking .dot { animation: y-dot 1.2s ease-in-out infinite; }
+  .thinking .dot2 { animation-delay: 0.2s; }
+  .thinking .dot3 { animation-delay: 0.4s; }
+
+  /* Celebrating: crouch, hop, card shake, sparkles, then a gentle happy rock */
+  .celebrating .fig { animation: y-hop 1s cubic-bezier(0.3, 0.7, 0.4, 1) 0.1s both; }
+  .celebrating .card { animation: y-shake 0.5s ease-in-out 0.5s both; }
+  .celebrating .spark { animation: y-spark 0.7s ease-out 0.35s both; }
+  .celebrating .spark2 { animation-delay: 0.45s; }
+  .celebrating .spark3 { animation-delay: 0.55s; }
+  .celebrating .sway { animation: y-happy 2.6s ease-in-out 1.2s infinite; }
+
+  /* Encouraging: leans in, waves twice, lowers the arm. Then a small nod every 6s. */
+  .encouraging .lean { animation: y-lean 2.6s ease-in-out both; }
+  .encouraging .wave { animation: y-wave 2.6s ease-in-out both; }
+  .encouraging .lines { animation: y-lines 2.6s linear both; }
+  .encouraging .rest { animation: y-rest 2.6s linear both; }
+  .encouraging .sway { animation: y-nod 6s ease-in-out 3.2s infinite; }
+  .encouraging .blink { animation: y-blink 4.6s linear 2.6s infinite; }
+  .encouraging .blink2 { animation: y-blink 7.3s linear 4.1s infinite; }
+
+  /* Small sizes only blink (and read, when thinking) */
+  .sm .fig, .sm .sway, .sm .lean,
+  .sm .card, .sm .wave, .sm .rest { animation: none; }
+
+  @keyframes y-blink { 0%, 94%, 100% { transform: scaleY(1); } 97% { transform: scaleY(0.08); } }
+  @keyframes y-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.6px); } }
+  @keyframes y-look {
+    0%, 78%, 100% { transform: translate(0, 0); }
+    82%, 90% { transform: translate(-3px, 0.5px); }
+  }
+  @keyframes y-read {
+    0%, 4% { transform: translate(-1px, -0.5px); }
+    20% { transform: translate(2px, -0.5px); }
+    24% { transform: translate(-1px, 0.8px); }
+    40% { transform: translate(2px, 0.8px); }
+    46%, 78% { transform: translate(-3px, 1.5px); }
+    84%, 100% { transform: translate(-1px, -0.5px); }
+  }
+  @keyframes y-turn { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(-4deg); } }
+  @keyframes y-dot {
+    0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
+    25% { opacity: 1; transform: translateY(-1.5px); }
+  }
+  @keyframes y-hop {
+    0% { transform: translateY(0) scale(1, 1); }
+    14% { transform: translateY(0) scale(1.06, 0.92); }
+    38% { transform: translateY(-12px) scale(0.97, 1.04); }
+    60% { transform: translateY(0) scale(1.04, 0.95); }
+    78% { transform: translateY(-2px) scale(1, 1); }
+    100% { transform: translateY(0) scale(1, 1); }
+  }
+  @keyframes y-shake {
+    0%, 100% { transform: rotate(0deg); }
+    20% { transform: rotate(9deg); }
+    45% { transform: rotate(-7deg); }
+    70% { transform: rotate(4deg); }
+  }
+  @keyframes y-spark {
+    0% { transform: scale(0) rotate(0deg); opacity: 0; }
+    40% { transform: scale(1.15) rotate(20deg); opacity: 1; }
+    100% { transform: scale(0.6) rotate(45deg); opacity: 0; }
+  }
+  @keyframes y-happy { 0%, 100% { transform: rotate(0deg); } 25% { transform: rotate(-2deg); } 75% { transform: rotate(2deg); } }
+  @keyframes y-lean { 0% { transform: rotate(0deg); } 12%, 72% { transform: rotate(3deg); } 86%, 100% { transform: rotate(0deg); } }
+  /* The raised arm swings up from the resting angle (100deg) and back down; the swap with the
+     resting arm is instant at those points, so there's never a half-transparent arm on screen. */
+  @keyframes y-wave {
+    0%, 30% { transform: rotate(100deg); opacity: 0; }
+    30.1% { transform: rotate(100deg); opacity: 1; }
+    38% { transform: rotate(0deg); }
+    46% { transform: rotate(-16deg); }
+    54% { transform: rotate(6deg); }
+    62% { transform: rotate(-14deg); }
+    70% { transform: rotate(4deg); }
+    76% { transform: rotate(0deg); }
+    84% { transform: rotate(100deg); opacity: 1; }
+    84.1%, 100% { transform: rotate(100deg); opacity: 0; }
+  }
+  @keyframes y-rest { 0%, 30% { opacity: 1; } 30.1%, 84% { opacity: 0; } 84.1%, 100% { opacity: 1; } }
+  @keyframes y-lines { 0%, 40% { opacity: 0; } 46%, 70% { opacity: 0.55; } 76%, 100% { opacity: 0; } }
+  @keyframes y-nod {
+    0%, 82%, 100% { transform: translateY(0) scale(1, 1); }
+    86% { transform: translateY(1.5px) scale(1.01, 0.985); }
+    90% { transform: translateY(0) scale(1, 1); }
+    93% { transform: translateY(1px) scale(1, 1); }
+    96% { transform: translateY(0) scale(1, 1); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .yogo * { animation: none !important; }
+  }
