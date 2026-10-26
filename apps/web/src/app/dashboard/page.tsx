@@ -190,5 +190,6 @@ export default function DashboardPage() {
   return (
     <RequireAuth>
       <Dashboard />
+    </RequireAuth>
   );
 }
