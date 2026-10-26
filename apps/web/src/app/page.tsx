@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Yogo from "@/components/yogo";
 import { useAuth } from "@/components/auth";
 import { btnPrimary, btnSecondary } from "@/components/ui";
 
@@ -27,13 +28,17 @@ export default function Home() {
           <div className="flex items-center justify-between border-b border-gray-100 pb-5 text-sm"><span className="font-semibold text-gray-700">Biology · Cell essentials</span><span className="text-gray-600">01 / 12</span></div>
           <p className="mt-8 text-sm font-semibold text-accent">Question</p><p className="mt-3 text-2xl font-semibold leading-9 tracking-tight">What gives a cell the energy to do its thing?</p>
           <div className="my-7 h-px bg-gray-100" /><p className="text-sm font-semibold text-gray-600">Answer</p><p className="mt-3 text-base leading-7 text-gray-700">Mitochondria produce ATP, the energy that powers most cellular processes.</p>
-          <div className="mt-8 flex items-center gap-2 text-sm text-emerald-800"><span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-50" aria-hidden="true">✓</span>One more thing you’ll remember.</div>
+          <div className="mt-8 flex items-center gap-3 text-sm text-gray-700"><Yogo expression="idle" size={56} title="Yogo, Recall’s study companion" className="shrink-0" /><span>One more thing you’ll remember.</span></div>
         </div>
       </div>
     </section>
     <section className="mt-8 border-t border-gray-200 pt-12 sm:mt-12 sm:pt-16">
       <div className="flex flex-wrap items-end justify-between gap-4"><h2 className="max-w-lg text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">Good notes deserve<br />a second life.</h2><p className="max-w-sm text-base leading-7 text-gray-600">From a folder full of notes to a manageable daily routine.</p></div>
       <div className="mt-10 grid gap-8 md:grid-cols-3">{steps.map((step) => <div key={step.number} className="border-t-2 border-blue-200 pt-5"><p className="text-sm font-semibold text-accent">{step.number}</p><h3 className="mt-5 text-xl font-semibold">{step.title}</h3><p className="mt-3 text-base leading-7 text-gray-600">{step.text}</p></div>)}</div>
+    </section>
+    <section aria-labelledby="meet-yogo" className="mt-16 flex flex-col items-center gap-5 rounded-3xl border border-blue-100 bg-[#edf2ff] px-7 py-8 text-center sm:flex-row sm:gap-8 sm:px-10 sm:text-left">
+      <Yogo expression="encouraging" size={144} className="shrink-0" />
+      <div><h2 id="meet-yogo" className="text-3xl font-semibold tracking-tight">Meet Yogo.</h2><p className="mt-3 max-w-xl text-base leading-7 text-gray-700">A little yogurt, a little encouragement. Yogo is your study companion, keeping you company one card at a time.</p></div>
     </section>
     <footer className="mt-20 flex flex-wrap justify-between gap-3 border-t border-gray-200 py-7 text-sm text-gray-600"><span className="font-semibold text-ink">Recall</span></footer>
   </>;

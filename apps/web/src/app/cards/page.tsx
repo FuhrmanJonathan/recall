@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Yogo from "@/components/yogo";
 import { useEffect, useRef, useState } from "react";
 import { useLeaveGuard } from "@/components/use-leave-guard";
 import { RequireAuth, useAuth } from "@/components/auth";
@@ -191,14 +192,14 @@ function Study() {
         <Link href={`/decks/${card.deck_id}`} className="mt-3 inline-block text-sm text-gray-600 hover:text-accent">{card.deck_title} ↗</Link>
         <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-gray-200"><div className="h-full bg-accent" style={{ width: `${index / session.length * 100}%` }} /></div>
         <button ref={cardRef} aria-describedby="study-card-content" aria-label={flipped ? "Answer. Flip to question" : "Question. Flip to answer"} disabled={saving} onClick={() => setFlipped(!flipped)} className="mt-6 block w-full rounded-2xl text-left">
-          <Card className="flex min-h-72 flex-col justify-between p-7 sm:p-10"><span className="text-sm font-semibold text-gray-600">{flipped ? "Answer" : "Question"}</span><p id="study-card-content" className="my-9 whitespace-pre-wrap break-words text-center text-2xl leading-relaxed">{flipped ? card.answer : card.question}</p><span className="text-center text-sm text-accent">{flipped ? "Show question ↻" : "Show answer ↻"}</span></Card>
+          <Card className="flex min-h-72 flex-col justify-between p-7 sm:p-10"><span className="flex w-full items-center justify-between gap-3"><span className="text-sm font-semibold text-gray-600">{flipped ? "Answer" : "Question"}</span><Yogo expression={flipped ? "encouraging" : "thinking"} size={48} /></span><p id="study-card-content" className="my-9 whitespace-pre-wrap break-words text-center text-2xl leading-relaxed">{flipped ? card.answer : card.question}</p><span className="text-center text-sm text-accent">{flipped ? "Show question ↻" : "Show answer ↻"}</span></Card>
         </button>
         {!flipped ? <button disabled={saving} onClick={() => setFlipped(true)} className={`mt-5 w-full ${btnPrimary}`}>Show answer</button> : mode === "practice" ? <button className={`mt-5 w-full ${btnPrimary}`} onClick={() => { setFlipped(false); setIndex((value) => value + 1); }}>Next card →</button> : <div className="mt-6">
           <div className="grid grid-cols-4 gap-2">{(["Again", "Hard", "Good", "Easy"] as Rating[]).map((rating) => <button key={rating} disabled={saving || conflict} onClick={() => void rate(rating)} className="rounded-xl border border-gray-300 bg-white px-3 py-3 text-center text-base font-semibold transition-colors hover:border-accent hover:bg-blue-50 focus-visible:border-accent disabled:cursor-not-allowed disabled:opacity-50">{rating}</button>)}</div>
         </div>}
         {saving && <p role="status" className="mt-3 text-sm">Saving review…</p>}
         {saveError && <div role="alert" className="mt-4 rounded-lg bg-red-50 p-4 text-sm text-red-800"><p>{saveError}</p><p className="mt-2">{conflict ? "This card changed elsewhere. Reload the list to continue." : "Your place is saved. Try the rating again."}</p><button disabled={saving} onClick={back} className={`mt-3 ${btnSecondary}`}>Reload cards</button></div>}
-      </> : <Card className="mt-6 p-8 text-center"><h2 ref={completedRef} tabIndex={-1} className="text-xl font-semibold">{mode === "due" ? "Reviews saved" : "Practice complete"}</h2><p className="mt-2 text-base text-gray-600">{mode === "due" ? "Your next review dates have been updated." : "Your review schedule has stayed the same."}</p><button onClick={back} className={`mt-5 ${btnPrimary}`}>Back to cards</button>{mode === "practice" && <button onClick={() => { setIndex(0); setFlipped(false); }} className={`ml-3 mt-5 ${btnSecondary}`}>Practice again</button>}</Card>}
+      </> : <Card className="mt-6 p-8 text-center"><Yogo expression="celebrating" size={88} className="mx-auto mb-4" /><h2 ref={completedRef} tabIndex={-1} className="text-xl font-semibold">{mode === "due" ? "Reviews saved" : "Practice complete"}</h2><p className="mt-2 text-base text-gray-600">{mode === "due" ? "Your next review dates have been updated." : "Your review schedule has stayed the same."}</p><button onClick={back} className={`mt-5 ${btnPrimary}`}>Back to cards</button>{mode === "practice" && <button onClick={() => { setIndex(0); setFlipped(false); }} className={`ml-3 mt-5 ${btnSecondary}`}>Practice again</button>}</Card>}
     </section>;
   }
   function filter(action: () => void) { action(); reload(); }
