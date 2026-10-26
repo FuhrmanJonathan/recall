@@ -1,16 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { RequireAuth, useAuth } from "@/components/auth";
-import { Card, btnPrimary } from "@/components/ui";
-
-// Placeholder numbers until the dashboard reads real decks and reviews.
-const stats = [
-  { label: "Cards due today", value: 0 },
-  { label: "Decks", value: 0 },
-  { label: "Day streak", value: 0 },
-];
-
+import { RequireAuth } from "@/components/auth";
+import { Card, btnPrimary, btnSecondary } from "@/components/ui";
 
 function getColor(count: number): string {
   if (count === 0) return "#e5e7eb";
@@ -67,9 +59,10 @@ function HeatMap() {
   }
   return (
    <Card className="mt-6 p-5">
-    <h2 className="font-semibold">Study Activity</h2>
+    <h2 className="font-semibold">Study activity</h2>
+    {error && <p role="alert" className="mt-3 text-sm text-red-700">{error}</p>}
       <div style={{ display: "flex", gap: "20px", margin: "20px 0" }}>
-        <button onClick={() => changeMonth(-1)}>←</button>
+        <button aria-label="Previous month" onClick={() => changeMonth(-1)}>←</button>
 
         <strong>
           {month.toLocaleDateString("en-US", {
@@ -79,6 +72,7 @@ function HeatMap() {
         </strong>
 
         <button
+          aria-label="Next month"
           onClick={() => changeMonth(1)}
           disabled={
             month.getFullYear() === today.getFullYear() &&
@@ -91,7 +85,8 @@ function HeatMap() {
 
       <div style={{
         display: "grid",
-        gridTemplateColumns: "repeat(7, 40px)",
+        gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
+        maxWidth: "420px",
         gap: "5px"
       }}>
         {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(day => (
@@ -120,8 +115,8 @@ function HeatMap() {
               key={i}
               title={`${count} cards reviewed`}
               style={{
-                width: "40px",
-                height: "40px",
+                width: "100%",
+                aspectRatio: "1",
                 backgroundColor: getColor(count),
                 borderRadius: "5px",
                 display: "flex",
@@ -139,53 +134,53 @@ function HeatMap() {
   );
 }
 
+type DeckSummary = { id: number; title: string; card_count: number };
+
 function Dashboard() {
-  const { user } = useAuth();
-
-  return (
-    <section>
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
-          <p className="mt-1 text-sm text-gray-500">Signed in as {user?.email}</p>
-        </div>
-        <Link href="/cards" className={btnPrimary}>Start studying</Link>
-      </div>
-
-      <div className="mt-6 grid grid-cols-3 gap-4">
-        {stats.map((stat) => (
-          <Card key={stat.label} className="p-4 sm:p-5">
-            <p className="text-xs text-gray-500 sm:text-sm">{stat.label}</p>
-            <p className="mt-1 text-2xl font-semibold">{stat.value}</p>
-          </Card>
-        ))}
-      </div>
-
-      <div className="mt-6 grid gap-4 lg:grid-cols-3">
-        <Card className="p-5 lg:col-span-2">
-          <h2 className="font-semibold">Your decks</h2>
-          <div className="mt-4 rounded-lg border border-dashed border-gray-300 p-8 text-center">
-            <p className="text-sm font-medium">Your study library</p>
-            <p className="mt-1 text-sm text-gray-500">Find your saved decks or upload notes to your library.</p>
-            <Link href="/decks" className="mt-4 inline-block text-sm font-medium text-accent hover:underline">
-              Browse your decks
-            </Link>
-          </div>
-        </Card>
-
-        <Card className="p-5">
-          <h2 className="font-semibold">Up next</h2>
-          <p className="mt-4 text-sm text-gray-500">Nothing due right now.</p>
-          <Link href="/schedule" className="mt-4 inline-block text-sm font-medium text-accent hover:underline">
-            View schedule
-          </Link>
-        </Card>
-      </div>
-      <HeatMap/>
-    </section>
-  );
-
+  const [decks, setDecks] = useState<DeckSummary[]>([]);
+  const [due, setDue] = useState<number | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [revision, setRevision] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true); setError("");
+    async function load() {
+      try {
+        const [deckRes, queueRes] = await Promise.all([
+          fetch("/api/decks", { signal: controller.signal, cache: "no-store" }),
+          fetch("/api/study/cards?limit=1", { signal: controller.signal, cache: "no-store" }),
+        ]);
+        if (!deckRes.ok || !queueRes.ok) throw new Error("Could not load your study overview.");
+        const [nextDecks, queue] = await Promise.all([deckRes.json(), queueRes.json()]);
+        if (!controller.signal.aborted) { setDecks(nextDecks); setDue(queue.total); }
+      } catch (e) { if (!controller.signal.aborted) setError(e instanceof Error ? e.message : "Could not load overview."); }
+      finally { if (!controller.signal.aborted) setLoading(false); }
+    }
+    void load(); return () => controller.abort();
+  }, [revision]);
+  const stats = [
+    { label: "Your decks", value: decks.length },
+    { label: "Saved flashcards", value: decks.reduce((sum, deck) => sum + deck.card_count, 0) },
+    { label: "Ready to review", value: due ?? 0 },
+  ];
+  return <section>
+    <div className="flex flex-wrap items-end justify-between gap-5">
+      <div><h1 className="mt-2 text-4xl font-semibold tracking-tight">Dashboard</h1></div>
+      <Link href="/cards" className={btnPrimary}>Start studying →</Link>
+    </div>
+    {error && <div role="alert" className="mt-6 rounded-xl border border-red-200 bg-red-50 p-4 text-red-800">{error}<button onClick={() => setRevision((value) => value + 1)} className={`ml-4 ${btnSecondary}`}>Try again</button></div>}
+    <div className="mt-8 grid gap-4 sm:grid-cols-3">{stats.map((stat) => <Card key={stat.label} className="p-6"><p className="text-sm font-medium text-gray-600">{stat.label}</p><p className="mt-3 text-4xl font-semibold tracking-tight">{loading || error ? "—" : stat.value}</p></Card>)}</div>
+    <div className="mt-8 grid items-start gap-6 lg:grid-cols-[1.2fr_1fr]">
+      <Card className="p-6 sm:p-7"><div className="mb-5 flex items-center justify-between gap-3"><h2 className="text-xl font-semibold">Your decks</h2><Link href="/decks" className="text-sm font-semibold text-accent">View all →</Link></div>
+        {loading ? <p role="status" className="py-8 text-gray-600">Loading your decks…</p> : decks.length ? <div className="divide-y divide-gray-100">{decks.slice(0, 5).map((deck) => <Link key={deck.id} href={`/decks/${deck.id}`} className="group flex items-center justify-between gap-4 py-5"><div className="min-w-0"><h3 className="break-words text-lg font-semibold group-hover:text-accent">{deck.title}</h3><p className="mt-1 text-sm text-gray-600">{deck.card_count} flashcards</p></div><span aria-hidden="true" className="text-accent">↗</span></Link>)}</div> : !error && <div className="rounded-xl bg-gray-50 p-6"><h3 className="text-lg font-semibold">Your next subject starts here.</h3><p className="mt-2 text-base text-gray-600">Create a deck and add your first cards.</p><Link href="/decks" className={`mt-5 ${btnPrimary}`}>Create a deck</Link></div>}
+        <div className="mt-6 border-t border-gray-100 pt-5"><Link href="/schedule" className="text-sm font-semibold text-gray-700 hover:text-accent">Manage study reminders →</Link></div>
+      </Card>
+      <div className="[&>div]:mt-0"><HeatMap /></div>
+    </div>
+  </section>;
 }
+
 export default function DashboardPage() {
   return (
     <RequireAuth>

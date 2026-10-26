@@ -1,12 +1,14 @@
 """Upload notes -> extract text (if needed) -> OpenAI flashcards -> save as a Deck."""
 
+import importlib.util
+import os
 from pathlib import PurePath
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from pydantic import BaseModel, ConfigDict, StringConstraints
-from sqlalchemy import select
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app import config
@@ -54,11 +56,21 @@ class DeckOut(BaseModel):
 
     id: int
     title: str
+    version: int = 1
     flashcards: list[CardOut]
 
 
 class GeneratedDeckOut(DeckOut):
     source: str  # "pdf", "text", "docx" or "image"
+
+
+@router.get("/flashcards/status")
+def generation_status(user: User = Depends(get_current_user)) -> dict[str, bool]:
+    """Read configuration only; never validate credentials with a paid request."""
+    return {
+        "configured": bool(os.getenv("OPENAI_API_KEY", "").strip()),
+        "images_available": all(importlib.util.find_spec(name) is not None for name in ("PIL", "torch", "transformers")),
+    }
 
 
 @router.post("/flashcards/generate", status_code=201)
@@ -122,7 +134,73 @@ def get_deck(
     deck = session.get(Deck, deck_id)
     if deck is None or deck.user_id != user.id:
         raise HTTPException(status_code=404, detail="Deck not found.")
-    return DeckOut.model_validate(deck)
+    return DeckOut(
+        id=deck.id, title=deck.title, version=deck.version,
+        flashcards=[CardOut.model_validate(card) for card in sorted(deck.flashcards, key=lambda card: card.id)],
+    )
+
+
+class DeckCardIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: int | None = Field(default=None, gt=0)
+    question: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2_000)]
+    answer: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=5_000)]
+    needs_review: bool = False
+
+
+class DeckUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+    version: int = Field(ge=1)
+    flashcards: list[DeckCardIn] = Field(max_length=1000)
+
+
+@router.put("/decks/{deck_id}")
+def update_deck(
+    deck_id: int,
+    body: DeckUpdate,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> DeckOut:
+    """Save an entire edit in one transaction, preserving retained cards' study history."""
+    deck = session.scalar(select(Deck).where(Deck.id == deck_id, Deck.user_id == user.id))
+    if deck is None:
+        raise HTTPException(404, "Deck not found.")
+    if deck.version != body.version:
+        raise HTTPException(409, "This deck changed in another tab. Your edits have not been saved. Copy anything you need, then reload the latest deck.")
+    existing = {card.id: card for card in deck.flashcards}
+    ids = [card.id for card in body.flashcards if card.id is not None]
+    if len(ids) != len(set(ids)) or any(card_id not in existing for card_id in ids):
+        raise HTTPException(422, "Cards must belong to this deck and appear only once. Reload the deck and try again.")
+    # Claim this revision before editing cards, so a stale tab cannot delete newer work.
+    claimed = session.execute(update(Deck).where(
+        Deck.id == deck_id, Deck.user_id == user.id, Deck.version == body.version,
+    ).values(title=body.title, version=Deck.version + 1).execution_options(synchronize_session=False))
+    if claimed.rowcount != 1:
+        session.rollback()
+        raise HTTPException(409, "This deck changed in another tab. Your edits have not been saved. Copy anything you need, then reload the latest deck.")
+    # Deletions cascade to labels and reviews.
+    kept = set(ids)
+    for card_id, card in existing.items():
+        if card_id not in kept:
+            session.delete(card)
+    for draft in body.flashcards:
+        if draft.id is None:
+            session.add(Flashcard(deck_id=deck.id, question=draft.question,
+                                  answer=draft.answer, needs_review=draft.needs_review))
+        else:
+            card = existing[draft.id]
+            card.question = draft.question
+            card.answer = draft.answer
+            card.needs_review = draft.needs_review
+    session.commit()
+    session.expire(deck)
+    return DeckOut(
+        id=deck.id, title=deck.title, version=deck.version,
+        flashcards=[CardOut.model_validate(card) for card in sorted(deck.flashcards, key=lambda card: card.id)],
+    )
 
 
 class CardUpdate(BaseModel):
@@ -154,6 +232,8 @@ def update_flashcard(
     if not changes:
         raise HTTPException(status_code=422, detail="Nothing to update.")
 
+    # Single-card edits must also invalidate open whole-deck editors.
+    session.execute(update(Deck).where(Deck.id == card.deck_id).values(version=Deck.version + 1))
     if "question" in changes:
         card.question = changes["question"]
     if "answer" in changes:
