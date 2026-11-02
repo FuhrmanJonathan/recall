@@ -41,11 +41,16 @@ Use the frontend's `/signup` and `/login` pages, or explore the API at
 - `POST /api/auth/login` checks the saved password hash and starts a session.
 - `GET /api/auth/me` returns the logged-in user's ID and email.
 - `POST /api/auth/logout` revokes the session and clears its cookie.
+- `POST /api/auth/password/forgot` emails a time-limited password reset link.
+- `POST /api/auth/password/reset` consumes the link and changes the password.
 
 Passwords use Argon2 hashes. Sessions expire after seven days; only a hash of
 the random session token is stored in the database. The browser sends the
 HTTP-only `recall_session` cookie on `/api` requests. Signup and login responses
 contain only the user's ID and email.
+Password reset links expire after 30 minutes, can only be used once, and revoke
+existing login sessions. Reset email uses the existing Resend configuration;
+set `WEB_URL` to the frontend's public URL outside local development.
 
 Flashcard generation and deck retrieval require login. Generated decks belong
 to the logged-in user, and other users cannot retrieve them. Existing demo decks
@@ -59,8 +64,9 @@ DATABASE_URL=sqlite:////absolute/path/to/recall.db npm run dev:api
 ```
 
 The parent directory must exist. The API reads environment variables from the
-process; it does not automatically load an API `.env` file. For HTTPS deployment,
-set `SESSION_COOKIE_SECURE=true`. Adding the session table is automatic for
+process and loads optional settings from `apps/api/.env` for local development.
+Put `OPENAI_API_KEY=...` in that ignored file to enable AI note generation and
+quizzes. For HTTPS deployment, set `SESSION_COOKIE_SECURE=true`. Adding the session table is automatic for
 existing databases; future changes to existing table columns will need migrations.
 
 ### Reviewing and editing decks

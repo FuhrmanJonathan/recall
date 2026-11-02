@@ -41,6 +41,16 @@ class AuthSession(TimestampMixin, Base):
     user: Mapped[User] = relationship(back_populates="sessions")
 
 
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    expires_at: Mapped[int] = mapped_column(index=True)
+
+
 class Deck(TimestampMixin, Base):
     __tablename__ = "decks"
 

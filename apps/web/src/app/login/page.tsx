@@ -60,6 +60,9 @@ function LoginForm() {
         <label htmlFor="login-password" className="text-sm font-semibold">Password</label>
         <input id="login-password" disabled={busy} name="password" type="password" required autoComplete="current-password"
                placeholder="Password" className={inputClass} />
+        <Link href="/reset-password" className="self-end text-sm font-medium text-accent underline underline-offset-2">
+          Forgot password?
+        </Link>
         <button type="submit" disabled={busy} className={submitClass}>
           {busy ? "Logging in…" : "Log in"}
         </button>

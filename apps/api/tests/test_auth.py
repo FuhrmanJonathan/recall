@@ -12,7 +12,7 @@ from app import generate, main
 from app.deps import get_session
 from app.flashcards import CardDraft
 from recall_db.database import create_database_engine, create_tables
-from recall_db.models import AuthSession, Deck, User
+from recall_db.models import AuthSession, Deck, PasswordResetToken, User
 
 
 CREDENTIALS = {"email": "student@example.com", "password": "study-password"}
@@ -138,6 +138,84 @@ def test_login_restores_session_from_saved_user(client, engine):
     with Session(engine) as session:
         saved_session = session.get(AuthSession, hashlib.sha256(token.encode()).hexdigest())
         assert saved_session.user_id == user["id"]
+
+
+def test_password_reset_email_is_generic_and_resets_password(client, engine, monkeypatch):
+    signup(client)
+    sent = []
+    monkeypatch.setattr(
+        "app.auth.send_password_reset_email",
+        lambda email, token: sent.append((email, token)),
+    )
+
+    response = client.post(
+        "/api/auth/password/forgot", json={"email": "STUDENT@example.com"}
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "message": "If that email has an account, a password reset link has been sent."
+    }
+    assert len(sent) == 1
+    email, token = sent[0]
+    assert email == "student@example.com"
+    with Session(engine) as session:
+        reset = session.get(PasswordResetToken, hashlib.sha256(token.encode()).hexdigest())
+        assert reset is not None
+        assert reset.expires_at > int(time.time())
+
+    response = client.post(
+        "/api/auth/password/reset",
+        json={"token": token, "password": "new-password"},
+    )
+    assert response.status_code == 200
+    assert client.get("/api/auth/me").status_code == 401
+    assert client.post(
+        "/api/auth/login",
+        json={"email": "student@example.com", "password": "new-password"},
+    ).status_code == 200
+    assert client.post(
+        "/api/auth/password/reset",
+        json={"token": token, "password": "another-password"},
+    ).status_code == 400
+    with Session(engine) as session:
+        assert session.scalars(select(PasswordResetToken)).all() == []
+
+
+def test_password_reset_request_does_not_disclose_unknown_email(client, monkeypatch):
+    monkeypatch.setattr(
+        "app.auth.send_password_reset_email",
+        lambda email, token: pytest.fail("No email should be sent for unknown addresses"),
+    )
+    response = client.post(
+        "/api/auth/password/forgot", json={"email": "unknown@example.com"}
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "message": "If that email has an account, a password reset link has been sent."
+    }
+
+
+def test_password_reset_rejects_expired_token(client, engine):
+    with Session(engine) as session:
+        user = User(email="student@example.com", password_hash="old-hash")
+        session.add(user)
+        session.flush()
+        token = "expired-reset-token"
+        session.add(PasswordResetToken(
+            token_hash=hashlib.sha256(token.encode()).hexdigest(),
+            user_id=user.id,
+            expires_at=int(time.time()) - 1,
+        ))
+        session.commit()
+
+    response = client.post(
+        "/api/auth/password/reset",
+        json={"token": token, "password": "new-password"},
+    )
+    assert response.status_code == 400
+    with Session(engine) as session:
+        assert session.get(User, 1).password_hash == "old-hash"
 
 
 @pytest.mark.parametrize("credentials", [
