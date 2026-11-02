@@ -2,10 +2,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type SubmitEvent } from "react";
 import { canLeavePage } from "@/components/use-leave-guard";
 import { usePathname, useRouter } from "next/navigation";
-import { useState, type SubmitEvent } from "react";
 import { useAuth } from "@/components/auth";
 import { Wordmark } from "@/components/ui";
 
