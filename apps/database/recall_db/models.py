@@ -48,6 +48,15 @@ class Deck(TimestampMixin, Base):
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), index=True)
     title: Mapped[str] = mapped_column(String(200))
+    is_public: Mapped[bool] = mapped_column(
+        default=False, server_default="0", nullable=False
+    )
+    description: Mapped[str] = mapped_column(
+        Text, default="", server_default="", nullable=False
+    )
+    subject: Mapped[str] = mapped_column(
+        String(100), default="", server_default="", nullable=False
+    )
     version: Mapped[int] = mapped_column(default=1, server_default="1")
 
     owner: Mapped[User] = relationship(back_populates="decks")

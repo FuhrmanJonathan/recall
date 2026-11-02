@@ -62,7 +62,21 @@ def preview_public_deck(deck_id: int, session: Session = Depends(get_session)):
                             flashcards=[SharedCard(question=c.question, answer=c.answer)
                                         for c in deck.flashcards])
 
+@router.get("/decks/{deck_id}/sharing", response_model=PublishIn)
+def get_deck_sharing(
+    deck_id: int,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    deck = session.get(Deck, deck_id)
+    if deck is None or deck.user_id != user.id:
+        raise HTTPException(404, "Deck not found.")
 
+    return PublishIn(
+        is_public=deck.is_public,
+        description=deck.description,
+        subject=deck.subject,
+    )
 @router.put("/decks/{deck_id}/sharing", response_model=PublicDeck)
 def set_deck_sharing(
     deck_id: int, body: PublishIn,

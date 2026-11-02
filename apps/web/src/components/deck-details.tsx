@@ -15,6 +15,13 @@ function Details({ deckId }: { deckId: string }) {
   const [query, setQuery] = useState("");
   const [flaggedOnly, setFlaggedOnly] = useState(false);
   const [revision, setRevision] = useState(0);
+  const [isPublic, setIsPublic] = useState(false);
+  const [description, setDescription] = useState("");
+  const [subject, setSubject] = useState("");
+  const [sharingLoading, setSharingLoading] = useState(true);
+  const [savingSharing, setSavingSharing] = useState(false);
+  const [sharingMessage, setSharingMessage] = useState("");
+  const [sharingError, setSharingError] = useState("");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -29,6 +36,88 @@ function Details({ deckId }: { deckId: string }) {
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [deckId, revision]);
+  useEffect(() => {
+    const controller = new AbortController();
+
+    setSharingLoading(true);
+    setSharingError("");
+
+    async function loadSharing() {
+      try {
+        const response = await fetch(
+          `/api/decks/${encodeURIComponent(deckId)}/sharing`,
+          {
+            signal: controller.signal,
+            credentials: "include",
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error("Could not load sharing settings.");
+        }
+
+        const data = await response.json();
+
+        if (!controller.signal.aborted) {
+          setIsPublic(data.is_public);
+          setDescription(data.description);
+          setSubject(data.subject);
+        }
+      } catch {
+        if (!controller.signal.aborted) {
+          setSharingError("Could not load sharing settings.");
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setSharingLoading(false);
+        }
+      }
+    }
+
+    void loadSharing();
+    return () => controller.abort();
+  }, [deckId, revision]);
+
+  async function saveSharing() {
+    setSavingSharing(true);
+    setSharingMessage("");
+    setSharingError("");
+
+    try {
+      const response = await fetch(
+        `/api/decks/${encodeURIComponent(deckId)}/sharing`,
+        {
+          method: "PUT",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            is_public: isPublic,
+            description,
+            subject,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(
+          typeof data.detail === "string"
+            ? data.detail
+            : "Could not save sharing settings."
+        );
+      }
+
+      setSharingMessage("Sharing settings saved!");
+    } catch (e) {
+      setSharingError(
+        e instanceof Error ? e.message : "Could not save settings."
+      );
+    } finally {
+      setSavingSharing(false);
+    }
+  }
 
   if (loading) return <p role="status" className="py-20 text-center text-gray-600">Opening your deck…</p>;
   if (!deck || error) return <Card className="p-8"><p role="alert" className="text-red-800">{error}</p><div className="mt-5 flex gap-3"><button onClick={() => setRevision((v) => v + 1)} className={btnPrimary}>Try again</button><Link href="/decks" className={btnSecondary}>My Decks</Link></div></Card>;
@@ -45,6 +134,80 @@ function Details({ deckId }: { deckId: string }) {
         <div className="flex flex-wrap gap-3"><Link href={`/decks/${deck.id}/edit`} className={btnSecondary}>Edit deck</Link>{deck.flashcards.length > 0 && <Link href={`/cards?deck=${deck.id}`} className={btnPrimary}>Study this deck →</Link>}</div>
       </div>
     </div>
+
+  <Card className="mt-6 p-6">
+    <h2 className="text-xl font-semibold">Sharing Settings</h2>
+    <p className="mt-2 text-sm text-gray-600">
+      Choose whether other students can discover and copy this deck.
+    </p>
+
+    {sharingLoading ? (
+      <p className="mt-4 text-sm text-gray-600">
+        Loading sharing settings…
+      </p>
+    ) : (
+      <div className="mt-5 space-y-4">
+        <label className="flex items-center gap-3">
+          <input
+            type="checkbox"
+            checked={isPublic}
+            onChange={(e) => {
+              setIsPublic(e.target.checked);
+              setSharingMessage("");
+            }}
+            className="h-4 w-4"
+          />
+          <span>Make this deck public</span>
+        </label>
+
+        <label className="block">
+          <span className="text-sm font-medium">Subject</span>
+          <input
+            type="text"
+            maxLength={100}
+            value={subject}
+            onChange={(e) => setSubject(e.target.value)}
+            placeholder="e.g. Economics"
+            className="mt-2 w-full rounded-lg border border-gray-300 p-3"
+          />
+        </label>
+
+        <label className="block">
+          <span className="text-sm font-medium">Description</span>
+          <textarea
+            maxLength={1000}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="What is this deck about?"
+            className="mt-2 w-full rounded-lg border border-gray-300 p-3"
+            rows={3}
+          />
+        </label>
+
+        <button
+          type="button"
+          onClick={saveSharing}
+          disabled={savingSharing}
+          className={btnPrimary}
+        >
+          {savingSharing ? "Saving…" : "Save Sharing Settings"}
+        </button>
+      </div>
+    )}
+
+    {sharingMessage && (
+      <p role="status" className="mt-3 text-sm text-green-700">
+        {sharingMessage}
+      </p>
+    )}
+
+    {sharingError && (
+      <p role="alert" className="mt-3 text-sm text-red-700">
+        {sharingError}
+      </p>
+    )}
+  </Card>
+
     <div className="mb-5 mt-10 flex flex-wrap items-end justify-between gap-4">
       <div><h2 className="text-2xl font-semibold tracking-tight">Cards in this deck</h2></div>
       <Link href={`/decks/${deck.id}/edit?add=1`} className={btnSecondary}>+ Add a card</Link>
