@@ -89,3 +89,18 @@ def test_deleting_user_cascades_to_auth_sessions(session: Session):
     session.commit()
 
     assert session.scalars(select(AuthSession)).all() == []
+
+
+def test_existing_decks_gain_revision_without_losing_data(tmp_path):
+    from sqlalchemy import text
+    from recall_db.database import create_tables
+
+    engine = create_database_engine(f"sqlite:///{tmp_path / 'legacy.db'}")
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE decks (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, title VARCHAR(200) NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL)"))
+        connection.execute(text("INSERT INTO decks (id, user_id, title) VALUES (1, 1, 'Existing deck')"))
+    create_tables(engine)
+    create_tables(engine)  # Repeated startup must be safe.
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT title, version FROM decks WHERE id=1")).one() == ('Existing deck', 1)
+    engine.dispose()

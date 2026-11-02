@@ -1,3 +1,4 @@
+import os
 from datetime import time
 
 from fastapi import APIRouter, Depends
@@ -14,6 +15,11 @@ router = APIRouter(
     prefix="/api/reminders",
     tags=["reminders"]
 )
+@router.get("/status")
+def reminder_status(user: User = Depends(get_current_user)) -> dict[str, bool]:
+    return {"email_configured": bool(os.getenv("RESEND_API_KEY", "").strip())}
+
+
 class ReminderSettings(BaseModel):
     reminder_type: Literal["daily", "scheduled", "none"]
     reminder_time: time

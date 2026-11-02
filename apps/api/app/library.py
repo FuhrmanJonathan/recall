@@ -2,10 +2,11 @@
 
 from datetime import datetime
 from pathlib import PurePath
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, StringConstraints
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
@@ -22,6 +23,24 @@ class LibraryItem(BaseModel):
     created_at: datetime
     card_count: int = 0
     flagged_count: int = 0  # cards flagged "needs review"
+
+
+class DeckCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+
+
+@router.post("/decks", status_code=201, response_model=LibraryItem)
+def create_deck(
+    body: DeckCreate,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    deck = Deck(user_id=user.id, title=body.title)
+    session.add(deck)
+    session.commit()
+    session.refresh(deck)
+    return LibraryItem(id=deck.id, title=deck.title, created_at=deck.created_at)
 
 
 @router.get("/decks", response_model=list[LibraryItem])

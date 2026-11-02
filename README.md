@@ -62,3 +62,15 @@ The parent directory must exist. The API reads environment variables from the
 process; it does not automatically load an API `.env` file. For HTTPS deployment,
 set `SESSION_COOKIE_SECURE=true`. Adding the session table is automatic for
 existing databases; future changes to existing table columns will need migrations.
+
+### Reviewing and editing decks
+
+In **My Decks**, choose **Create a deck**, then **Write cards** to create a deck manually, or **Generate from notes** to generate cards from an upload. **Save notes only** keeps the original file without creating flashcards. Generation requires the backend's OpenAI configuration; manual creation and editing need no external service.
+
+Open a saved deck to read its cards. Use **Edit deck** or an individual **Edit card** action to edit its title, questions, answers, and review flags, or add/remove cards. Changes are applied with **Save changes** or **Save deck**. Removed cards can be undone before saving; saving a removal also deletes that card's reviews and labels. Retained cards keep their study history and labels.
+
+Unsaved editor drafts and study sessions are kept per account and browser tab in session storage. Editing a card during study offers **Return to study** to resume with refreshed card text. The editor also provides card search, a needs-checking filter, and a flip preview.
+
+`POST /api/decks` creates an empty owned deck from `{title}`. `PUT /api/decks/{deck_id}` atomically saves `{title, version, flashcards: [{id?, question, answer, needs_review}]}`. Omit `id` for new cards; existing IDs must belong to that deck. Omitted existing cards are deleted. The version returned by GET is required; stale saves receive `409` without modifying cards. Existing SQLite decks receive version 1 on startup.
+
+The library checks `/api/flashcards/status` before offering generation. This reports configuration, not credential validity. Reminder preferences can be saved independently of email delivery; delivering reminders still requires the email configuration and reminder service.
