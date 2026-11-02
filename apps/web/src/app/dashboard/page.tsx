@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { RequireAuth } from "@/components/auth";
 import { Card, btnPrimary, btnSecondary } from "@/components/ui";
+import DailyStudyGoal from "@/components/daily-study-goal";
 
 function getColor(count: number): string {
   if (count === 0) return "#e5e7eb";
@@ -171,6 +172,7 @@ function Dashboard() {
     </div>
     {error && <div role="alert" className="mt-6 rounded-xl border border-red-200 bg-red-50 p-4 text-red-800">{error}<button onClick={() => setRevision((value) => value + 1)} className={`ml-4 ${btnSecondary}`}>Try again</button></div>}
     <div className="mt-8 grid gap-4 sm:grid-cols-3">{stats.map((stat) => <Card key={stat.label} className="p-6"><p className="text-sm font-medium text-gray-600">{stat.label}</p><p className="mt-3 text-4xl font-semibold tracking-tight">{loading || error ? "—" : stat.value}</p></Card>)}</div>
+    <DailyStudyGoal />
     <div className="mt-8 grid items-start gap-6 lg:grid-cols-[1.2fr_1fr]">
       <Card className="p-6 sm:p-7"><div className="mb-5 flex items-center justify-between gap-3"><h2 className="text-xl font-semibold">Your decks</h2><Link href="/decks" className="text-sm font-semibold text-accent">View all →</Link></div>
         {loading ? <p role="status" className="py-8 text-gray-600">Loading your decks…</p> : decks.length ? <div className="divide-y divide-gray-100">{decks.slice(0, 5).map((deck) => <Link key={deck.id} href={`/decks/${deck.id}`} className="group flex items-center justify-between gap-4 py-5"><div className="min-w-0"><h3 className="break-words text-lg font-semibold group-hover:text-accent">{deck.title}</h3><p className="mt-1 text-sm text-gray-600">{deck.card_count} flashcards</p></div><span aria-hidden="true" className="text-accent">↗</span></Link>)}</div> : !error && <div className="rounded-xl bg-gray-50 p-6"><h3 className="text-lg font-semibold">Your next subject starts here.</h3><p className="mt-2 text-base text-gray-600">Create a deck and add your first cards.</p><Link href="/decks" className={`mt-5 ${btnPrimary}`}>Create a deck</Link></div>}

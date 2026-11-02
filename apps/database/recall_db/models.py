@@ -114,6 +114,17 @@ class StudyActivity(Base):
     )
 
 
+class DailyStudyGoal(Base):
+    __tablename__ = "daily_study_goals"
+    __table_args__ = (CheckConstraint("target >= 1 AND target <= 1000"),)
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    target: Mapped[int] = mapped_column(Integer, default=20)
+    timezone: Mapped[str] = mapped_column(String(100), default="UTC")
+
+
 class ReminderPreference(Base):
     __tablename__ = "reminder_preferences"
 
