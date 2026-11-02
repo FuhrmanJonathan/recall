@@ -21,32 +21,139 @@ async function check(res: Response) {
   throw new Error(typeof body.detail === "string" ? body.detail : "Request failed. Please try again.");
 }
 
-function LabelEditor({ card, onSaved }: { card: CardData; onSaved: () => void }) {
+type LabelInfo = { name: string; color: string };
+
+const PALETTE: Record<string, { bg: string; fg: string }> = {
+  gray:   { bg: "#f3f4f6", fg: "#374151" },
+  red:    { bg: "#fee2e2", fg: "#991b1b" },
+  orange: { bg: "#ffedd5", fg: "#9a3412" },
+  yellow: { bg: "#fef9c3", fg: "#854d0e" },
+  green:  { bg: "#dcfce7", fg: "#166534" },
+  teal:   { bg: "#ccfbf1", fg: "#115e59" },
+  blue:   { bg: "#dbeafe", fg: "#1e40af" },
+  purple: { bg: "#f3e8ff", fg: "#6b21a8" },
+  pink:   { bg: "#fce7f3", fg: "#9d174d" },
+};
+const COLOR_KEYS = Object.keys(PALETTE);
+const colorStyle = (c?: string) => { const p = PALETTE[c ?? ""] ?? PALETTE.blue; return { backgroundColor: p.bg, color: p.fg }; };
+function defaultColor(name: string) {
+  let h = 0;
+  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return COLOR_KEYS[h % COLOR_KEYS.length];
+}
+
+function LabelChip({ name, color, children }: { name: string; color: string; children?: React.ReactNode }) {
+  return <span style={colorStyle(color)} className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-sm">{name}{children}</span>;
+}
+
+function LabelEditor({ card, allLabels, onSaved }: { card: CardData; allLabels: LabelInfo[]; onSaved: () => void }) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState("");
+  const [items, setItems] = useState<LabelInfo[]>([]);
+  const [text, setText] = useState("");
+  const [active, setActive] = useState(0);
+  const [paletteFor, setPaletteFor] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const lock = useRef(false);
+
+  const colorOf = (name: string) => allLabels.find((l) => l.name === name)?.color ?? defaultColor(name);
+
+  const q = text.toLowerCase();
+  const suggestions = q
+    ? allLabels
+        .filter((l) => !items.some((i) => i.name === l.name) && l.name.includes(q))
+        .sort((a, b) => Number(b.name.startsWith(q)) - Number(a.name.startsWith(q)) || a.name.localeCompare(b.name))
+        .slice(0, 6)
+    : [];
+  const top = suggestions.find((s) => s.name.startsWith(q));
+  const ghost = top ? top.name.slice(q.length) : "";
+
+  function startEditing() {
+    setItems(card.labels.map((name) => ({ name, color: colorOf(name) })));
+    setText(""); setActive(0); setPaletteFor(null); setError(""); setEditing(true);
+  }
+  function add(raw: string): LabelInfo[] {
+    const name = raw.trim().toLowerCase();
+    if (!name) return items;
+    if (items.some((i) => i.name === name)) { setText(""); return items; }
+    if (name.length > 40) { setError("Labels can be up to 40 characters."); return items; }
+    if (items.length >= 10) { setError("Use up to 10 labels."); return items; }
+    const next = [...items, { name, color: colorOf(name) }];
+    setItems(next); setText(""); setActive(0); setError("");
+    return next;
+  }
+  function setColor(name: string, color: string) {
+    setItems((list) => list.map((i) => (i.name === name ? { ...i, color } : i)));
+    setPaletteFor(null);
+  }
+  function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "ArrowDown" && suggestions.length) { e.preventDefault(); setActive((a) => (a + 1) % suggestions.length); }
+    else if (e.key === "ArrowUp" && suggestions.length) { e.preventDefault(); setActive((a) => (a - 1 + suggestions.length) % suggestions.length); }
+    else if (e.key === "Enter" && text.trim()) { e.preventDefault(); add(suggestions[active]?.name ?? text); }
+    else if (e.key === "Tab" && top && text) { e.preventDefault(); add(top.name); }
+    else if (e.key === "," ) { e.preventDefault(); add(text); }
+    else if (e.key === "Backspace" && !text && items.length) setItems((l) => l.slice(0, -1));
+    else if (e.key === "Escape") setText("");
+  }
+
   async function save() {
     if (lock.current) return;
     lock.current = true; setSaving(true); setError("");
     try {
-      const labels = draft.split(",").map((name) => name.trim()).filter(Boolean);
-      if (labels.length > 10 || labels.some((name) => name.length > 40)) throw new Error("Use up to 10 labels, each up to 40 characters.");
-      await check(await fetch(`/api/flashcards/${card.id}/labels`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ labels }) }));
+      const finalItems = text.trim() ? add(text) : items;
+      await check(await fetch(`/api/flashcards/${card.id}/labels`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ labels: finalItems }),
+      }));
       setEditing(false); onSaved();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not save labels."); }
     finally { lock.current = false; setSaving(false); }
   }
+
   return <div className="mt-3">
     <div className="flex flex-wrap items-center gap-2">
-      {card.labels.length ? card.labels.map((name) => <span key={name} className="rounded-full bg-blue-50 px-2 py-1 text-sm text-accent">{name}</span>) : null}
-      {!editing && <button className="text-sm text-accent underline" onClick={() => { setDraft(card.labels.join(", ")); setEditing(true); }}>{card.labels.length ? "Edit labels" : "+ Add labels"}</button>}
+      {card.labels.map((name) => <LabelChip key={name} name={name} color={colorOf(name)} />)}
+      {!editing && <button className="text-sm text-accent underline" onClick={startEditing}>{card.labels.length ? "Edit labels" : "+ Add labels"}</button>}
     </div>
-    {editing && <form className="mt-3 space-y-2" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+
+    {editing && <form className="mt-3 space-y-2" onSubmit={(e) => { e.preventDefault(); void save(); }}>
       <label className="block text-sm" htmlFor={`labels-${card.id}`}>Labels for this card</label>
-      <input id={`labels-${card.id}`} disabled={saving} value={draft} onChange={(e) => setDraft(e.target.value)} className={`${inputStyle} w-full`} placeholder="biology, chapter 3, exam 1" aria-describedby={`help-${card.id}`} />
-      <p id={`help-${card.id}`} className="text-sm text-gray-500">Comma-separated, up to 10 labels, 40 characters each. Saved in lowercase. Leave blank to remove all.</p>
+
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-gray-300 bg-white p-2">
+        {items.map((item) => <LabelChip key={item.name} name={item.name} color={item.color}>
+          <button type="button" aria-label={`Change color of ${item.name}`} onClick={() => setPaletteFor(paletteFor === item.name ? null : item.name)}
+            className="h-3 w-3 rounded-full border border-black/20" style={{ backgroundColor: PALETTE[item.color]?.fg }} />
+          <button type="button" aria-label={`Remove ${item.name}`} onClick={() => setItems((l) => l.filter((i) => i.name !== item.name))} className="leading-none">×</button>
+        </LabelChip>)}
+
+        <div className="relative min-w-[8rem] flex-1">
+          <div aria-hidden="true" className="pointer-events-none absolute inset-0 flex items-center whitespace-pre px-1 text-sm">
+            <span className="invisible">{text}</span><span className="text-gray-400">{ghost}</span>
+          </div>
+          <input id={`labels-${card.id}`} disabled={saving} value={text} autoComplete="off"
+            onChange={(e) => { setText(e.target.value); setActive(0); }} onKeyDown={onKeyDown}
+            role="combobox" aria-expanded={suggestions.length > 0} aria-controls={`sugg-${card.id}`} aria-autocomplete="list"
+            className="relative w-full bg-transparent px-1 py-1 text-sm outline-none" placeholder={items.length ? "" : "biology, chapter 3…"} aria-describedby={`help-${card.id}`} />
+        </div>
+      </div>
+
+      {suggestions.length > 0 && <ul id={`sugg-${card.id}`} role="listbox" className="rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
+        {suggestions.map((s, i) => <li key={s.name} role="option" aria-selected={i === active}>
+          <button type="button" onMouseDown={(e) => { e.preventDefault(); add(s.name); }} onMouseEnter={() => setActive(i)}
+            className={`flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm ${i === active ? "bg-gray-100" : ""}`}>
+            <LabelChip name={s.name} color={s.color} />
+          </button>
+        </li>)}
+      </ul>}
+
+      {paletteFor && <div className="flex flex-wrap items-center gap-2" role="group" aria-label={`Color for ${paletteFor}`}>
+        <span className="text-sm text-gray-600">Color for “{paletteFor}”:</span>
+        {COLOR_KEYS.map((key) => <button key={key} type="button" aria-label={key} title={key} onClick={() => setColor(paletteFor, key)}
+          className={`h-6 w-6 rounded-full border-2 ${items.find((i) => i.name === paletteFor)?.color === key ? "border-gray-900" : "border-white ring-1 ring-gray-300"}`}
+          style={{ backgroundColor: PALETTE[key].bg }} />)}
+      </div>}
+
+      <p id={`help-${card.id}`} className="text-sm text-gray-500">Type to search your labels. Tab or Enter adds one; comma adds a new one. Click the dot on a label to change its color. Up to 10 labels, 40 characters each.</p>
       <button disabled={saving} className={btnPrimary + disabled}>{saving ? "Saving…" : "Save labels"}</button>
       <button type="button" disabled={saving} onClick={() => { setEditing(false); setError(""); }} className={`ml-2 ${btnSecondary}`}>Cancel</button>
     </form>}
@@ -69,7 +176,7 @@ function Study() {
   const [deckId, setDeckId] = useState("");
   const [label, setLabel] = useState("");
   const [decks, setDecks] = useState<{ id: number; title: string }[]>([]);
-  const [labels, setLabels] = useState<string[]>([]);
+  const [labels, setLabels] = useState<LabelInfo[]>([]);
   const [queue, setQueue] = useState<Queue>({ cards: [], total: 0 });
   const [offset, setOffset] = useState(0);
   const [revision, setRevision] = useState(0);
@@ -215,7 +322,7 @@ function Study() {
     </div>
     <div className="mt-6 grid gap-4 sm:grid-cols-2">
       <label className="text-sm font-medium">Deck<select value={deckId} onChange={(e) => filter(() => setDeckId(e.target.value))} className={`${inputStyle} mt-2 block w-full`}><option value="">All decks</option>{decks.map((deck) => <option key={deck.id} value={String(deck.id)}>{deck.title}</option>)}</select></label>
-      <label className="text-sm font-medium">Label<select value={label} onChange={(e) => filter(() => setLabel(e.target.value))} className={`${inputStyle} mt-2 block w-full`}><option value="">All labels</option>{[...new Set([...labels, ...(label ? [label] : [])])].sort().map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
+      <label className="text-sm font-medium">Label<select value={label} onChange={(e) => filter(() => setLabel(e.target.value))} className={`${inputStyle} mt-2 block w-full`}><option value="">All labels</option>{[...new Set([...labels.map((l) => l.name), ...(label ? [label] : [])])].sort().map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
     </div>
     {loading ? <p role="status" className="mt-8">Loading cards…</p> : error ? <Card className="mt-6 p-5"><p role="alert" className="text-red-700">{error}</p><button onClick={reload} className={`mt-3 ${btnSecondary}`}>Try again</button></Card> : <>
       <div className="my-6 flex flex-wrap items-center justify-between gap-3"><p role="status" className="text-base">{queue.total} {mode === "due" ? "cards ready to review" : "cards to practice"}{queue.total > queue.cards.length && ` · Showing ${offset + 1}–${offset + queue.cards.length}`}</p><button disabled={!queue.cards.length} onClick={() => start()} className={btnPrimary + disabled}>{mode === "due" ? "Start review" : "Start practice"}{queue.cards.length > 0 && ` (${queue.cards.length})`} →</button></div>
@@ -228,7 +335,7 @@ function Study() {
           <span className="mt-3 block whitespace-pre-wrap break-words text-lg font-semibold leading-7 group-hover:text-accent">{card.question}</span>
           <span className="mt-4 inline-block text-sm font-semibold text-accent">{mode === "due" ? "Review from this card" : "Practice from this card"} →</span>
         </button>
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 px-5 pb-4 sm:px-6"><LabelEditor card={card} onSaved={reload} /><Link href={`/decks/${card.deck_id}/edit?card=${card.id}`} className="mt-3 text-sm font-semibold text-accent hover:underline">Edit this card</Link></div>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 px-5 pb-4 sm:px-6"><LabelEditor card={card} allLabels={labels} onSaved={reload} /><Link href={`/decks/${card.deck_id}/edit?card=${card.id}`} className="mt-3 text-sm font-semibold text-accent hover:underline">Edit this card</Link></div>
       </Card>)}</div>
       {queue.total > 100 && <div className="mt-6 flex flex-wrap items-center gap-3"><button disabled={offset === 0} className={btnSecondary + disabled} onClick={() => { setQuizSelection([]); setLoading(true); setOffset(Math.max(0, offset - 100)); }}>← Previous 100</button><button disabled={offset + queue.cards.length >= queue.total} className={btnSecondary + disabled} onClick={() => { setQuizSelection([]); setLoading(true); setOffset(offset + 100); }}>Next 100 →</button></div>}
     </>}
