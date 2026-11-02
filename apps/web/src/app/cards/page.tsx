@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import Yogo from "@/components/yogo";
 import { useEffect, useRef, useState } from "react";
 import { useLeaveGuard } from "@/components/use-leave-guard";
@@ -56,6 +57,8 @@ function LabelEditor({ card, onSaved }: { card: CardData; onSaved: () => void })
 type StudySnapshot = { mode: Mode; deckId: string; label: string; offset: number; session: CardData[]; index: number };
 
 function Study() {
+  const router = useRouter();
+  const [quizSelection, setQuizSelection] = useState<number[]>([]);
   const { user } = useAuth();
   const sessionKey = `recall:study:${user?.id}`;
   const cardRef = useRef<HTMLButtonElement>(null);
@@ -142,7 +145,7 @@ function Study() {
     async function load() {
       setLoading(true); setError("");
       try {
-        const params = new URLSearchParams({ mode, offset: String(offset), limit: "50" });
+        const params = new URLSearchParams({ mode, offset: String(offset), limit: "100" });
         if (deckId) params.set("deck_id", deckId);
         if (label) params.set("label", label);
         const options = { signal: controller.signal, cache: "no-store" as const };
@@ -156,7 +159,7 @@ function Study() {
     void load();
     return () => controller.abort();
   }, [ready, mode, deckId, label, offset, revision]);
-  function reload() { setOffset(0); setLoading(true); setRevision((value) => value + 1); }
+  function reload() { setQuizSelection([]); setOffset(0); setLoading(true); setRevision((value) => value + 1); }
   function back() {
     if (lock.current) return;
     try { sessionStorage.removeItem(sessionKey); } catch { /* Storage may be disabled. */ }
@@ -216,8 +219,10 @@ function Study() {
     </div>
     {loading ? <p role="status" className="mt-8">Loading cards…</p> : error ? <Card className="mt-6 p-5"><p role="alert" className="text-red-700">{error}</p><button onClick={reload} className={`mt-3 ${btnSecondary}`}>Try again</button></Card> : <>
       <div className="my-6 flex flex-wrap items-center justify-between gap-3"><p role="status" className="text-base">{queue.total} {mode === "due" ? "cards ready to review" : "cards to practice"}{queue.total > queue.cards.length && ` · Showing ${offset + 1}–${offset + queue.cards.length}`}</p><button disabled={!queue.cards.length} onClick={() => start()} className={btnPrimary + disabled}>{mode === "due" ? "Start review" : "Start practice"}{queue.cards.length > 0 && ` (${queue.cards.length})`} →</button></div>
+      {queue.cards.length > 0 && <div className="mb-6 flex flex-wrap items-center gap-3"><button disabled={!queue.cards.some(c => quizSelection.includes(c.id))} className={btnSecondary + disabled} onClick={() => { const ids = queue.cards.filter(c => quizSelection.includes(c.id)).map(c => c.id); router.push(`/quiz?cards=${ids.join(",")}`); }}>Create quiz ({queue.cards.filter(c => quizSelection.includes(c.id)).length}) →</button><button className="text-sm text-accent underline" onClick={() => setQuizSelection(queue.cards.every(c => quizSelection.includes(c.id)) ? [] : queue.cards.map(c => c.id))}>{queue.cards.every(c => quizSelection.includes(c.id)) ? "Clear selection" : "Select all on this page"}</button><p className="text-sm text-gray-600">One question per selected card · Sends selected card text to OpenAI · More than 20 requires confirmation</p></div>}
       {!queue.cards.length && <Card className="p-6"><p>{mode === "due" ? "You’re caught up for these filters." : "No cards match these filters."}</p><div className="mt-4 flex flex-wrap gap-3">{mode === "due" && <button onClick={() => filter(() => setMode("practice"))} className={btnPrimary}>Practice these cards instead</button>}<Link href="/decks" className={btnSecondary}>Go to My Decks</Link></div></Card>}
       <div className="space-y-4">{queue.cards.map((card, cardIndex) => <Card key={card.id} className="overflow-hidden">
+        <label className="flex items-center gap-2 px-5 pt-4 text-sm"><input type="checkbox" checked={quizSelection.includes(card.id)} onChange={e => setQuizSelection(ids => e.target.checked ? [...ids, card.id] : ids.filter(id => id !== card.id))} />Select for quiz</label>
         <button onClick={() => start(cardIndex)} className="group block w-full p-5 text-left hover:bg-blue-50/50 sm:p-6" aria-label={`${mode === "due" ? "Review" : "Practice"} card: ${card.question}`}>
           <span className="flex flex-wrap justify-between gap-2 text-sm text-gray-600"><span>{card.deck_title}</span><span>{card.status === "new" ? "New" : `${card.status === "due" ? "Due" : "Next review"}: ${new Date(card.due_at!).toLocaleDateString()}`}</span></span>
           <span className="mt-3 block whitespace-pre-wrap break-words text-lg font-semibold leading-7 group-hover:text-accent">{card.question}</span>
@@ -225,7 +230,7 @@ function Study() {
         </button>
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 px-5 pb-4 sm:px-6"><LabelEditor card={card} onSaved={reload} /><Link href={`/decks/${card.deck_id}/edit?card=${card.id}`} className="mt-3 text-sm font-semibold text-accent hover:underline">Edit this card</Link></div>
       </Card>)}</div>
-      {queue.total > 50 && <div className="mt-6 flex flex-wrap items-center gap-3"><button disabled={offset === 0} className={btnSecondary + disabled} onClick={() => { setLoading(true); setOffset(Math.max(0, offset - 50)); }}>← Previous 50</button><button disabled={offset + queue.cards.length >= queue.total} className={btnSecondary + disabled} onClick={() => { setLoading(true); setOffset(offset + 50); }}>Next 50 →</button></div>}
+      {queue.total > 100 && <div className="mt-6 flex flex-wrap items-center gap-3"><button disabled={offset === 0} className={btnSecondary + disabled} onClick={() => { setQuizSelection([]); setLoading(true); setOffset(Math.max(0, offset - 100)); }}>← Previous 100</button><button disabled={offset + queue.cards.length >= queue.total} className={btnSecondary + disabled} onClick={() => { setQuizSelection([]); setLoading(true); setOffset(offset + 100); }}>Next 100 →</button></div>}
     </>}
   </section>;
 }
