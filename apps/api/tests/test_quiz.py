@@ -149,3 +149,58 @@ def test_selected_count_confirmation_and_single_request(setup, mock_ai, count):
     assert [e["source_card_id"] for e in result.json()["exercises"]] == ids
     assert len(mock_ai) == 1
     assert mock_ai[0]["max_output_tokens"] == max(1200, 160 * count)
+
+
+# --- blanks stored at generation time -------------------------------------------------
+
+
+def add_card(engine, deck_card, question, answer, blank):
+    with Session(engine) as s:
+        card = Flashcard(deck_id=s.get(Flashcard, deck_card).deck_id, question=question,
+                         answer=answer, cloze_blank=blank)
+        s.add(card); s.commit()
+        return card.id
+
+
+def test_stored_blank_needs_no_ai_call(setup, monkeypatch, mock_ai):
+    client, engine, (_, _, base) = setup
+    monkeypatch.delenv("OPENAI_API_KEY")  # a fully pre-blanked quiz works without a key
+    card = add_card(engine, base, "What makes ATP?", "The mitochondria makes ATP.", "mitochondria")
+    result = post(client, [card])
+    assert result.status_code == 200 and not mock_ai
+    assert result.json()["exercises"] == [{
+        "source_card_id": card, "context": "What makes ATP?",
+        "before": "The ", "answer": "mitochondria", "after": " makes ATP."}]
+
+
+def test_only_cards_without_a_blank_go_to_the_ai(setup, mock_ai):
+    client, engine, (_, _, base) = setup
+    stored = add_card(engine, base, "Q1?", "Cell division.", "division")
+    result = post(client, [base, stored])
+    assert result.status_code == 200
+    assert [e["source_card_id"] for e in result.json()["exercises"]] == [base, stored]
+    assert [e["answer"] for e in result.json()["exercises"]] == ["Two", "division"]
+    assert len(mock_ai) == 1
+    import json
+    assert [c["id"] for c in json.loads(mock_ai[0]["input"])] == [base]  # never the stored card
+
+
+def test_repeated_key_term_is_hidden_everywhere(setup):
+    client, engine, (_, _, base) = setup
+    card = add_card(engine, base, "Q?", "ATP is made. ATP stores energy.", "ATP")
+    exercise = post(client, [card]).json()["exercises"][0]
+    assert exercise["before"] == "" and "ATP" not in exercise["after"]
+
+
+def test_stale_blank_is_ignored_and_cleared_on_edit(setup, mock_ai):
+    client, engine, (_, _, base) = setup
+    card = add_card(engine, base, "Q?", "Cell division happens here.", "division")
+    keep = client.patch(f"/api/flashcards/{card}", headers=AUTH, json={"answer": "Cell division, again."})
+    assert keep.status_code == 200
+    with Session(engine) as s:
+        assert s.get(Flashcard, card).cloze_blank == "division"
+    drop = client.patch(f"/api/flashcards/{card}", headers=AUTH, json={"answer": "Something else"})
+    assert drop.status_code == 200
+    with Session(engine) as s:
+        assert s.get(Flashcard, card).cloze_blank is None
+    assert post(client, [card]).status_code == 200 and len(mock_ai) == 1  # falls back to the AI

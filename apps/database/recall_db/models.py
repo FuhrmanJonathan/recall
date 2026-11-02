@@ -65,6 +65,9 @@ class Flashcard(TimestampMixin, Base):
     answer: Mapped[str] = mapped_column(Text)
     # Set when OCR / generation was unsure about this card; cleared once the student edits it.
     needs_review: Mapped[bool] = mapped_column(default=False, server_default="0")
+    # Key term hidden in the fill-in-the-blank quiz, picked when the card was generated.
+    # NULL means the quiz asks the AI to pick one (manual cards, older decks).
+    cloze_blank: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     deck: Mapped[Deck] = relationship(back_populates="flashcards")
 
