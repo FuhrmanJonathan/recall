@@ -27,6 +27,7 @@ type Activity = {
 function HeatMap() {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [error, setError] = useState("");
+  const counts = new Map(activities.map(a => [a.date, a.cards_reviewed]));
 
   useEffect(() => {
     async function loadActivity() {
@@ -91,8 +92,9 @@ function HeatMap() {
 
       <div style={{
         display: "grid",
-        gridTemplateColumns: "repeat(7, 40px)",
-        gap: "5px"
+        gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
+        gap: "5px",
+        maxWidth: "520px"
       }}>
         {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(day => (
           <div key={day} style={{ textAlign: "center" }}>
@@ -111,17 +113,15 @@ function HeatMap() {
           String(i + 1).padStart(2, "0"),
         ].join("-");
 
-        const count =
-          activities.find((activity) => activity.date === date)
-            ?.cards_reviewed ?? 0;
+        const count = counts.get(date) ?? 0;
 
           return (
             <div
               key={i}
               title={`${count} cards reviewed`}
               style={{
-                width: "40px",
-                height: "40px",
+                width: "100%",
+                aspectRatio: "1 / 1",
                 backgroundColor: getColor(count),
                 borderRadius: "5px",
                 display: "flex",
@@ -135,6 +135,7 @@ function HeatMap() {
           );
         })}
       </div>
+      {error && <p role="alert" className="mt-3 text-sm text-red-600">{error}</p>}
     </Card>
   );
 }

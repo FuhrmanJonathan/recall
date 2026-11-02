@@ -14,7 +14,7 @@ from app.study import router as study_router
 from app.text import clean_text, split_into_chunks
 from recall_db.database import create_tables
 from app.reminders import router as reminders_router
-
+from app.sharing import router as sharing_router
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -30,7 +30,7 @@ app.include_router(activity_router)
 app.include_router(reminders_router)
 app.include_router(reviews_router)
 app.include_router(study_router)
-
+app.include_router(sharing_router)
 
 class TextIn(BaseModel):
     text: str
