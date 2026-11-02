@@ -19,6 +19,7 @@ type Activity = {
 function HeatMap() {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [error, setError] = useState("");
+  const counts = new Map(activities.map(a => [a.date, a.cards_reviewed]));
 
   useEffect(() => {
     async function loadActivity() {
@@ -106,9 +107,7 @@ function HeatMap() {
           String(i + 1).padStart(2, "0"),
         ].join("-");
 
-        const count =
-          activities.find((activity) => activity.date === date)
-            ?.cards_reviewed ?? 0;
+        const count = counts.get(date) ?? 0;
 
           return (
             <div
@@ -130,6 +129,7 @@ function HeatMap() {
           );
         })}
       </div>
+      {error && <p role="alert" className="mt-3 text-sm text-red-600">{error}</p>}
     </Card>
   );
 }

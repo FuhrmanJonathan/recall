@@ -1,15 +1,18 @@
+
 "use client";
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { canLeavePage } from "@/components/use-leave-guard";
 import { usePathname, useRouter } from "next/navigation";
+import { useState, type SubmitEvent } from "react";
 import { useAuth } from "@/components/auth";
 import { Wordmark } from "@/components/ui";
 
 const appLinks = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/decks", label: "My Decks" },
+  { href: "/explore", label: "Explore" },
   { href: "/cards", label: "Study" },
   { href: "/schedule", label: "Reminders" },
 ];
@@ -18,6 +21,7 @@ export default function Navbar() {
   const { user, loading, logout } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
+  const [search, setSearch] = useState("");
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState("");
 
@@ -29,6 +33,7 @@ export default function Navbar() {
     try { await logout(); router.replace("/"); }
     catch { setLogoutError("Could not log out. Please try again."); }
     finally { setLoggingOut(false); }
+  
   }
 
   const linkClass = (href: string) =>
@@ -38,12 +43,38 @@ export default function Navbar() {
         : "text-gray-600 hover:bg-gray-50 hover:text-ink"
     }`;
 
+  function handleSearch(e: SubmitEvent<HTMLFormElement>) {
+    e.preventDefault();
+
+    const query = search.trim();
+    if (!query) return;
+
+    router.push(`/explore?q=${encodeURIComponent(query)}`);
+  }
+
   return (
     <header className="relative border-b border-gray-200/80 bg-white">
       <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-6">
         <Link href={user ? "/dashboard" : "/"} className="shrink-0">
           <Wordmark />
         </Link>
+
+        {!loading && user && (
+          <form
+            onSubmit={handleSearch}
+            role="search"
+            className="order-3 w-full sm:order-none sm:min-w-40 sm:max-w-xs sm:flex-1"
+          >
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search flashcards..."
+              aria-label="Search public flashcards"
+              className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none"
+            />
+          </form>
+        )}
 
         {!loading && (
           <nav className={`flex flex-wrap items-center gap-1 text-sm sm:gap-2 sm:text-base ${user ? "w-full sm:w-auto" : ""}`}>
@@ -54,6 +85,7 @@ export default function Navbar() {
                     {link.label}
                   </Link>
                 ))}
+
                 <button
                   disabled={loggingOut}
                   onClick={onLogout}
@@ -64,10 +96,17 @@ export default function Navbar() {
               </>
             ) : (
               <>
-                <Link href="/login" className={linkClass("/login")}>
+                <Link
+                  href="/login"
+                  className={linkClass("/login")}
+                >
                   Log in
                 </Link>
-                <Link href="/signup" className="whitespace-nowrap rounded-md bg-accent px-3 py-1.5 font-medium text-white transition hover:bg-accent-dark">
+
+                <Link
+                  href="/signup"
+                  className="whitespace-nowrap rounded-md bg-accent px-3 py-1.5 font-medium text-white transition hover:bg-accent-dark"
+                >
                   Sign up
                 </Link>
               </>
