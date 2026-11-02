@@ -5,7 +5,7 @@ import asyncio
 import base64
 
 from openai import AsyncOpenAI, OpenAIError
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app import config
 from app.text import split_into_chunks
@@ -22,6 +22,11 @@ material. Do not skip content and do not add facts that are not in the material.
 - Write the cards in the same language as the material.
 - No duplicate cards.
 - Set needs_review to false on every card unless the instructions about the source say otherwise.
+- Set cloze_blank to the single most important key term or short phrase in the ANSWER (a concept, \
+name or quantity, not a filler word), copied exactly, with the same spelling and case, from the \
+answer text. It is hidden in a fill-in-the-blank quiz, so the question must not already contain it. \
+Use an empty string if the answer has no good term to hide.
+- Leave labels as an empty list unless the instructions about labels say otherwise.
 """
 
 OCR_NOTE = (
@@ -49,6 +54,27 @@ FOCUS_NOTE = (
 )
 
 
+# Optional auto-tagging. "general" gives a few broad subject labels; "specific" gives narrow
+# concept labels. Without a mode the model is told to leave labels empty.
+TAG_NOTES = {
+    "general": (
+        "Also give every card 1-2 broad labels naming its overall subject area or unit, the way "
+        'a textbook chapter or course unit would (for example "cell biology" or "genetics"). '
+        "Reuse the same few labels across the cards you write so related cards share them."
+    ),
+    "specific": (
+        "Also give every card 2-4 narrow labels naming the exact concept, process, structure or "
+        'term it covers (for example "krebs cycle" or "atp yield"). Prefer concrete topic names '
+        "over broad subject names."
+    ),
+}
+TAG_MODES = tuple(TAG_NOTES)
+LABEL_RULES = (
+    "Labels are lowercase topic names of 1-3 words with no commas, in the same language as "
+    "the material."
+)
+
+
 def normalize_focus(focus: str | None) -> str | None:
     """Collapse whitespace; return None when there is nothing to focus on."""
     cleaned = " ".join((focus or "").split())
@@ -64,6 +90,12 @@ def focus_block(focus: str | None) -> str:
     return f"{FOCUS_NOTE}\n<focus>{cleaned}</focus>\n"
 
 
+def tag_block(tag_mode: str | None) -> str:
+    if tag_mode not in TAG_NOTES:
+        return ""
+    return f"{TAG_NOTES[tag_mode]} {LABEL_RULES}\n"
+
+
 def _drop_defaults(schema: dict) -> None:
     # OpenAI's strict structured output wants every field required, with no defaults.
     for prop in schema.get("properties", {}).values():
@@ -76,6 +108,8 @@ class CardDraft(BaseModel):
     question: str
     answer: str
     needs_review: bool = False
+    cloze_blank: str = ""
+    labels: list[str] = Field(default_factory=list)
 
 
 class CardSet(BaseModel):
@@ -122,6 +156,14 @@ async def _generate(content: list[dict]) -> list[CardDraft]:
     return response.output_parsed.cards
 
 
+def clean_blank(answer: str, blank: str | None) -> str:
+    """Return the quiz blank if it is a usable exact piece of ``answer``, else ""."""
+    blank = (blank or "").strip()
+    if not blank or len(blank) > 200 or not any(c.isalnum() for c in blank) or blank not in answer:
+        return ""
+    return blank
+
+
 def dedupe_cards(cards: list[CardDraft]) -> list[CardDraft]:
     """Drop empty cards and cards whose question repeats an earlier one."""
     seen: set[str] = set()
@@ -133,13 +175,19 @@ def dedupe_cards(cards: list[CardDraft]) -> list[CardDraft]:
             continue
         seen.add(key)
         unique.append(
-            CardDraft(question=question, answer=answer, needs_review=card.needs_review)
+            CardDraft(
+                question=question,
+                answer=answer,
+                needs_review=card.needs_review,
+                cloze_blank=clean_blank(answer, card.cloze_blank),
+                labels=card.labels,
+            )
         )
     return unique
 
 
 async def generate_cards_from_pdf(
-    data: bytes, filename: str, *, focus: str | None = None
+    data: bytes, filename: str, *, focus: str | None = None, tag_mode: str | None = None
 ) -> list[CardDraft]:
     """Send the PDF straight to OpenAI (it reads both the text and the page images)."""
     encoded = base64.b64encode(data).decode("ascii")
@@ -150,18 +198,18 @@ async def generate_cards_from_pdf(
             "filename": filename or "notes.pdf",
             "file_data": f"data:application/pdf;base64,{encoded}",
         },
-        {"type": "input_text", "text": instruction + focus_block(focus)},
+        {"type": "input_text", "text": instruction + focus_block(focus) + tag_block(tag_mode)},
     ]
     return dedupe_cards(await _generate(content))
 
 
 async def generate_cards_from_text(
-    text: str, *, from_ocr: bool = False, focus: str | None = None
+    text: str, *, from_ocr: bool = False, focus: str | None = None, tag_mode: str | None = None
 ) -> list[CardDraft]:
     """Split cleaned text into chunks (text.split_into_chunks) and generate cards for each."""
     chunks = split_into_chunks(text, config.GENERATION_CHUNK_CHARS)
     limiter = asyncio.Semaphore(config.MAX_CONCURRENT_REQUESTS)
-    focus_text = focus_block(focus)
+    focus_text = focus_block(focus) + tag_block(tag_mode)
 
     async def run(index: int, chunk: str) -> list[CardDraft]:
         header = f"Create flashcards from these notes (part {index} of {len(chunks)}).\n"

@@ -308,7 +308,7 @@ def test_user_and_login_survive_new_client_and_database_engine(client, engine, m
 def test_generated_deck_is_private_to_signed_in_owner(client, engine, monkeypatch):
     owner = signup(client).json()
 
-    async def fake_cards(text, *, from_ocr=False, focus=None):
+    async def fake_cards(text, *, from_ocr=False, focus=None, tag_mode=None):
         return [CardDraft(question="What is mitosis?", answer="Cell division.")]
 
     monkeypatch.setattr(generate, "generate_cards_from_text", fake_cards)

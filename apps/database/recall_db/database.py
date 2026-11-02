@@ -46,7 +46,7 @@ def create_tables(target_engine: Engine = engine) -> None:
 # create_all() never alters tables that already exist, so columns added after the
 # first release are added here for databases created before them (SQLite only).
 _ADDED_COLUMNS: dict[str, dict[str, str]] = {
-    "flashcards": {"needs_review": "BOOLEAN NOT NULL DEFAULT 0"},
+    "flashcards": {"needs_review": "BOOLEAN NOT NULL DEFAULT 0", "cloze_blank": "TEXT"},
     "decks": {"version": "INTEGER NOT NULL DEFAULT 1"},
 }
 

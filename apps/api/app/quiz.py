@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app import config
 from app.deps import get_current_user, get_session
+from app.flashcards import clean_blank
 from recall_db.models import Deck, Flashcard, User
 
 router = APIRouter(prefix="/api/quiz", tags=["quiz"])
@@ -57,7 +58,8 @@ def sources(body: QuizIn, session: Session, user: User):
     by_id = {card.id: card for card in owned}
     if len(by_id) != len(ids):
         raise HTTPException(404, "One or more cards are unavailable. Return to cards and reload.")
-    cards = [{"id": i, "question": by_id[i].question, "answer": by_id[i].answer.strip()} for i in ids]
+    cards = [{"id": i, "question": by_id[i].question, "answer": by_id[i].answer.strip(),
+              "blank": clean_blank(by_id[i].answer.strip(), by_id[i].cloze_blank)} for i in ids]
     if any(not any(c.isalnum() for c in card["answer"]) for card in cards):
         raise HTTPException(422, "Each selected card needs answer text. Edit empty cards first.")
     if sum(len(c["question"]) + len(c["answer"]) for c in cards) > 12000:
@@ -66,7 +68,16 @@ def sources(body: QuizIn, session: Session, user: User):
     return cards, fingerprint
 
 
-def generate_exercises(cards: list[dict]) -> list[Exercise]:
+def exercise(card: dict, answer: str) -> Exercise:
+    before, _, after = card["answer"].partition(answer)
+    # Hide repeats of the key term too, or the visible text gives the answer away.
+    after = after.replace(answer, "_" * 8)
+    return Exercise(source_card_id=card["id"], context=card["question"],
+                    before=before, answer=answer, after=after)
+
+
+def pick_blanks(cards: list[dict]) -> dict[int, str]:
+    """Ask the AI for one blank per card; used only for cards with no stored blank."""
     key = os.getenv("OPENAI_API_KEY", "").strip()
     if not key:
         raise HTTPException(503, "AI quiz generation is not configured on this server.")
@@ -86,17 +97,22 @@ def generate_exercises(cards: list[dict]) -> list[Exercise]:
         choices = {c.source_card_id: c.answer for c in parsed.choices}
         if len(choices) != len(parsed.choices) or set(choices) != {c["id"] for c in cards}:
             raise ValueError("Invalid source IDs")
-        exercises = []
         for card in cards:
             answer = choices[card["id"]]
             if not answer.strip() or answer != answer.strip() or len(answer) > 200 or answer not in card["answer"]:
                 raise ValueError("Invalid blank")
-            before, _, after = card["answer"].partition(answer)
-            exercises.append(Exercise(source_card_id=card["id"], context=card["question"],
-                                      before=before, answer=answer, after=after))
-        return exercises
+        return choices
     except (OpenAIError, ValueError) as exc:
         raise HTTPException(502, "AI could not create a valid quiz. Please try again later.") from exc
+
+
+def generate_exercises(cards: list[dict]) -> list[Exercise]:
+    # Blanks chosen when the cards were generated cost nothing; only ask the AI for the rest.
+    blanks = {c["id"]: c["blank"] for c in cards if c["blank"]}
+    pending = [{k: c[k] for k in ("id", "question", "answer")} for c in cards if c["id"] not in blanks]
+    if pending:
+        blanks.update(pick_blanks(pending))
+    return [exercise(card, blanks[card["id"]]) for card in cards]
 
 
 # Bounded per-process, user/content-scoped cache; coalesces concurrent requests.

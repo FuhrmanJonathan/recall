@@ -22,6 +22,7 @@ from app.documents import (
     extract_docx_text,
 )
 from app.flashcards import (
+    TAG_MODES,
     CardDraft,
     GenerationError,
     generate_cards_from_pdf,
@@ -29,10 +30,14 @@ from app.flashcards import (
     normalize_focus,
 )
 from app.ocr import OCRError, OCRUnavailableError, extract_text_from_image
+from app.study import normalize_label
 from app.text import clean_text
-from recall_db.models import Deck, Flashcard, User
+from recall_db.models import CardLabel, Deck, Flashcard, User
 
 router = APIRouter(prefix="/api")
+
+# Most labels kept per card for each tag mode (broad tags are few, specific tags are more).
+_MAX_LABELS = {"general": 2, "specific": 4}
 
 _SIZE_LIMITS = {
     SourceKind.TEXT: config.MAX_UPLOAD_BYTES,
@@ -78,13 +83,16 @@ async def generate_flashcards(
     file: UploadFile,
     title: str | None = Form(default=None),
     focus: str | None = Form(default=None, max_length=config.MAX_FOCUS_CHARS),
+    tag_mode: str | None = Form(default=None),
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> GeneratedDeckOut:
     """Turn an uploaded file of class notes into a saved deck of flashcards.
 
     ``focus`` is optional free text (e.g. "DNA replication") telling the generator which
-    topic to put extra emphasis on.
+    topic to put extra emphasis on. ``tag_mode`` is optional too: ``"general"`` labels each
+    card with 1-2 broad subject areas, ``"specific"`` with 2-4 narrow concepts. Labels are
+    the same ones the Study page filters on. Leave it out for no tags.
     """
     filename = file.filename or ""
     kind = detect_source_kind(filename)
@@ -94,6 +102,10 @@ async def generate_flashcards(
             detail=f"Unsupported file type. Supported: {', '.join(SUPPORTED_EXTENSIONS)}",
         )
 
+    mode = (tag_mode or "").strip().lower() or None
+    if mode is not None and mode not in TAG_MODES:
+        raise HTTPException(status_code=422, detail="tag_mode must be 'general' or 'specific'.")
+
     limit = _SIZE_LIMITS[kind]
     data = await file.read(limit + 1)
     if len(data) > limit:
@@ -102,7 +114,7 @@ async def generate_flashcards(
         )
 
     try:
-        cards = await _make_cards(kind, filename, data, normalize_focus(focus))
+        cards = await _make_cards(kind, filename, data, normalize_focus(focus), mode)
     except OCRUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except OCRError as exc:
@@ -116,7 +128,7 @@ async def generate_flashcards(
         raise HTTPException(status_code=422, detail="No flashcards could be generated.")
 
     deck_title = (title or PurePath(filename).stem or "Untitled deck").strip()[:200]
-    deck = await run_in_threadpool(_save_deck, session, user, deck_title, cards)
+    deck = await run_in_threadpool(_save_deck, session, user, deck_title, cards, mode)
     return GeneratedDeckOut(
         id=deck.id,
         title=deck.title,
@@ -195,6 +207,7 @@ def update_deck(
             card.question = draft.question
             card.answer = draft.answer
             card.needs_review = draft.needs_review
+            _drop_stale_blank(card)
     session.commit()
     session.expire(deck)
     return DeckOut(
@@ -238,6 +251,7 @@ def update_flashcard(
         card.question = changes["question"]
     if "answer" in changes:
         card.answer = changes["answer"]
+        _drop_stale_blank(card)
     if "needs_review" in changes:
         card.needs_review = changes["needs_review"]
     elif "question" in changes or "answer" in changes:
@@ -246,14 +260,21 @@ def update_flashcard(
     return CardOut.model_validate(card)
 
 
+def _drop_stale_blank(card: Flashcard) -> None:
+    """An edited answer that no longer contains the stored quiz blank can't use it."""
+    if card.cloze_blank and card.cloze_blank not in card.answer:
+        card.cloze_blank = None
+
+
 async def _make_cards(
-    kind: SourceKind, filename: str, data: bytes, focus: str | None = None
+    kind: SourceKind, filename: str, data: bytes, focus: str | None = None,
+    tag_mode: str | None = None,
 ) -> list[CardDraft]:
     # Prong 1a: PDFs go straight to OpenAI.
     if kind is SourceKind.PDF:
         if not data.startswith(PDF_MAGIC):
             raise ValueError("This file is not a valid PDF.")
-        return await generate_cards_from_pdf(data, filename, focus=focus)
+        return await generate_cards_from_pdf(data, filename, focus=focus, tag_mode=tag_mode)
 
     # Prong 1b: other readable documents -> plain text -> OpenAI.
     # Prong 2: written notes (images) -> OCR model -> plain text -> OpenAI.
@@ -273,15 +294,42 @@ async def _make_cards(
     if len(text) > config.MAX_TEXT_CHARS:
         raise ValueError(f"Text is too long (max {config.MAX_TEXT_CHARS} characters).")
 
-    return await generate_cards_from_text(text, from_ocr=from_ocr, focus=focus)
+    return await generate_cards_from_text(text, from_ocr=from_ocr, focus=focus, tag_mode=tag_mode)
 
 
-def _save_deck(session: Session, user: User, title: str, cards: list[CardDraft]) -> Deck:
+def _clean_labels(raw: list[str], tag_mode: str | None) -> list[str]:
+    """Normalize model labels the same way the Study page does; drop bad ones and cap by mode."""
+    if tag_mode not in _MAX_LABELS:
+        return []  # no tags were asked for, so ignore anything the model sent anyway
+    labels: list[str] = []
+    for name in raw:
+        try:
+            label = normalize_label(name)
+        except ValueError:
+            continue
+        if label not in labels:
+            labels.append(label)
+    return labels[: _MAX_LABELS[tag_mode]]
+
+
+def _save_deck(
+    session: Session, user: User, title: str, cards: list[CardDraft], tag_mode: str | None = None
+) -> Deck:
     deck = Deck(title=title, user_id=user.id)
-    deck.flashcards.extend(
-        Flashcard(question=card.question, answer=card.answer, needs_review=card.needs_review)
+    flashcards = [
+        Flashcard(
+            question=card.question, answer=card.answer,
+            needs_review=card.needs_review, cloze_blank=card.cloze_blank or None,
+        )
         for card in cards
-    )
+    ]
+    deck.flashcards.extend(flashcards)
     session.add(deck)
+    session.flush()  # assigns card ids so labels can point at them
+    for flashcard, draft in zip(flashcards, cards):
+        session.add_all(
+            CardLabel(flashcard_id=flashcard.id, name=name)
+            for name in _clean_labels(draft.labels, tag_mode)
+        )
     session.commit()
     return deck
