@@ -77,6 +77,14 @@ Open a saved deck to read its cards. Use **Edit deck** or an individual **Edit c
 
 Unsaved editor drafts and study sessions are kept per account and browser tab in session storage. Editing a card during study offers **Return to study** to resume with refreshed card text. The editor also provides card search, a needs-checking filter, and a flip preview.
 
+After revealing an answer in **Review due cards**, press **1 Again**, **2 Hard**, **3 Good**, or **4 Easy** to save the rating and advance. Matching number badges appear on the buttons. Shortcuts are inactive before revealing the answer, in free practice, while typing in form controls, and while a review is saving; held keys and modifier combinations are ignored.
+
 `POST /api/decks` creates an empty owned deck from `{title}`. `PUT /api/decks/{deck_id}` atomically saves `{title, version, flashcards: [{id?, question, answer, needs_review}]}`. Omit `id` for new cards; existing IDs must belong to that deck. Omitted existing cards are deleted. The version returned by GET is required; stale saves receive `409` without modifying cards. Existing SQLite decks receive version 1 on startup.
 
 The library checks `/api/flashcards/status` before offering generation. This reports configuration, not credential validity. Reminder preferences can be saved independently of email delivery; delivering reminders still requires the email configuration and reminder service.
+
+### Daily study goals
+
+The dashboard starts with a daily target of 20 cards in the browser’s time zone. **Edit goal** opens a compact dialog with a single target control (1–1,000 cards). Saving stores the target per account and detects the browser’s time zone automatically. The progress bar counts successfully saved due-card reviews; free practice, quizzes, and manually recorded activity do not count. Yogo celebrates once the target is reached, and progress resets at midnight in the saved time zone, including daylight-saving changes. Returning to the dashboard, focusing its tab, or leaving it open refreshes progress automatically.
+
+`GET /api/goals/daily?timezone=America/New_York` returns the saved target (or the default), today’s review count, and the next reset time. `PUT /api/goals/daily` accepts `{target, timezone}`. Startup adds the `daily_study_goals` table to existing databases without changing their data.

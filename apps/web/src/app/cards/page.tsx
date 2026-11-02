@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Yogo from "@/components/yogo";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLeaveGuard } from "@/components/use-leave-guard";
 import { RequireAuth, useAuth } from "@/components/auth";
 import { Card, btnPrimary, btnSecondary } from "@/components/ui";
@@ -12,6 +12,7 @@ type CardData = { id: number; deck_id: number; deck_title: string; question: str
 type Queue = { cards: CardData[]; total: number };
 type Mode = "due" | "practice";
 type Rating = "Again" | "Hard" | "Good" | "Easy";
+const ratings: Rating[] = ["Again", "Hard", "Good", "Easy"];
 const inputStyle = "rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm";
 const disabled = " disabled:opacity-40 disabled:cursor-not-allowed";
 
@@ -170,7 +171,7 @@ function Study() {
     setSaveError(""); setConflict(false);
     window.scrollTo({ top: 0 });
   }
-  async function rate(rating: Rating) {
+  const rate = useCallback(async (rating: Rating) => {
     const card = session?.[index];
     if (!card || !flipped || mode !== "due" || lock.current || conflict) return;
     lock.current = true; setSaving(true); setSaveError("");
@@ -181,7 +182,22 @@ function Study() {
       setFlipped(false); setIndex((value) => value + 1);
     } catch (e) { setSaveError(e instanceof Error ? e.message : "Review not saved. Please try again."); }
     finally { lock.current = false; setSaving(false); }
-  }
+  }, [session, index, flipped, mode, conflict]);
+
+  useEffect(() => {
+    if (!session?.[index] || !flipped || mode !== "due" || saving || conflict) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.defaultPrevented || event.repeat || event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+      // Leave typing, number inputs, and custom form controls to the browser.
+      if (event.target instanceof Element && event.target.closest("input, textarea, select, [contenteditable]:not([contenteditable='false']), [role='textbox'], [role='combobox'], [role='spinbutton'], [role='slider']")) return;
+      const rating = /^[1-4]$/.test(event.key) ? ratings[Number(event.key) - 1] : undefined;
+      if (!rating || lock.current) return;
+      event.preventDefault();
+      void rate(rating);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [session, index, flipped, mode, saving, conflict, rate]);
   if (!ready) return <section className="mx-auto max-w-3xl"><h1 className="text-3xl font-semibold">Study</h1><p role="status" className="mt-6 text-gray-600">Opening your study session…</p></section>;
   if (session) {
     const card = session[index];
@@ -198,7 +214,8 @@ function Study() {
           <Card className="flex min-h-72 flex-col justify-between p-7 sm:p-10"><span className="flex w-full items-center justify-between gap-3"><span className="text-sm font-semibold text-gray-600">{flipped ? "Answer" : "Question"}</span><Yogo expression={flipped ? "encouraging" : "thinking"} size={48} /></span><p id="study-card-content" className="my-9 whitespace-pre-wrap break-words text-center text-2xl leading-relaxed">{flipped ? card.answer : card.question}</p><span className="text-center text-sm text-accent">{flipped ? "Show question ↻" : "Show answer ↻"}</span></Card>
         </button>
         {!flipped ? <button disabled={saving} onClick={() => setFlipped(true)} className={`mt-5 w-full ${btnPrimary}`}>Show answer</button> : mode === "practice" ? <button className={`mt-5 w-full ${btnPrimary}`} onClick={() => { setFlipped(false); setIndex((value) => value + 1); }}>Next card →</button> : <div className="mt-6">
-          <div className="grid grid-cols-4 gap-2">{(["Again", "Hard", "Good", "Easy"] as Rating[]).map((rating) => <button key={rating} disabled={saving || conflict} onClick={() => void rate(rating)} className="rounded-xl border border-gray-300 bg-white px-3 py-3 text-center text-base font-semibold transition-colors hover:border-accent hover:bg-blue-50 focus-visible:border-accent disabled:cursor-not-allowed disabled:opacity-50">{rating}</button>)}</div>
+          <div className="grid grid-cols-4 gap-2">{ratings.map((rating, i) => <button key={rating} disabled={saving || conflict} aria-keyshortcuts={String(i + 1)} title={`${rating} (press ${i + 1})`} onClick={() => void rate(rating)} className="flex flex-col items-center gap-1.5 rounded-xl border border-gray-300 bg-white px-2 py-3 text-center text-sm font-semibold transition-colors hover:border-accent hover:bg-blue-50 focus-visible:border-accent disabled:cursor-not-allowed disabled:opacity-50 sm:text-base"><kbd aria-hidden="true" className="inline-flex h-6 min-w-6 items-center justify-center rounded-md border border-gray-200 bg-gray-50 px-1 font-sans text-xs text-gray-600">{i + 1}</kbd><span>{rating}</span></button>)}</div>
+          <p className="mt-3 text-center text-xs text-gray-500">Press 1–4 to rate this card.</p>
         </div>}
         {saving && <p role="status" className="mt-3 text-sm">Saving review…</p>}
         {saveError && <div role="alert" className="mt-4 rounded-lg bg-red-50 p-4 text-sm text-red-800"><p>{saveError}</p><p className="mt-2">{conflict ? "This card changed elsewhere. Reload the list to continue." : "Your place is saved. Try the rating again."}</p><button disabled={saving} onClick={back} className={`mt-3 ${btnSecondary}`}>Reload cards</button></div>}

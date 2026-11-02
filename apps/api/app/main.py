@@ -12,6 +12,7 @@ from app.generate import router as flashcards_router
 from app.reviews import router as reviews_router
 from app.study import router as study_router
 from app.quiz import router as quiz_router
+from app.goals import router as goals_router
 from app.text import clean_text, split_into_chunks
 from recall_db.database import create_tables
 from app.reminders import router as reminders_router
@@ -33,6 +34,7 @@ app.include_router(reviews_router)
 app.include_router(study_router)
 app.include_router(sharing_router)
 app.include_router(quiz_router)
+app.include_router(goals_router)
 
 
 class TextIn(BaseModel):
