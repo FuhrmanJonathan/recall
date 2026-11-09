@@ -89,7 +89,12 @@ class Flashcard(TimestampMixin, Base):
     cloze_blank: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     deck: Mapped[Deck] = relationship(back_populates="flashcards")
-
+    # tag system
+    deck: Mapped[Deck] = relationship(back_populates="flashcards")
+    tags: Mapped[list["CardTag"]] = relationship(  
+        cascade="all, delete-orphan", passive_deletes=True, lazy="selectin")
+    images: Mapped[list["CardImage"]] = relationship(
+        cascade="all, delete-orphan", passive_deletes=True, lazy="selectin")
 
 class StudyActivity(Base):
     __tablename__ = "study_activity"
@@ -159,16 +164,28 @@ class Review(TimestampMixin, Base):
     rating: Mapped[str] = mapped_column(String(10))  # Again/Hard/Good/Easy
 
 
-class CardLabel(Base):
-    """Normalized labels attached to cards; ownership follows the card's deck."""
+# class CardLabel(Base):
+#     """Normalized labels attached to cards; ownership follows the card's deck."""
 
-    __tablename__ = "card_labels"
+#     __tablename__ = "card_labels"
 
-    flashcard_id: Mapped[int] = mapped_column(
-        ForeignKey("flashcards.id", ondelete="CASCADE"), primary_key=True
-    )
+#     flashcard_id: Mapped[int] = mapped_column(
+#         ForeignKey("flashcards.id", ondelete="CASCADE"), primary_key=True
+#     )
+#     name: Mapped[str] = mapped_column(String(40), primary_key=True, index=True)
+COLORS = {"gray", "red", "orange", "yellow", "green", "teal", "blue", "purple", "pink"}
+
+class DeckLabel(Base):
+    __tablename__ = "deck_labels"
+    deck_id: Mapped[int] = mapped_column(ForeignKey("decks.id", ondelete="CASCADE"), primary_key=True)
     name: Mapped[str] = mapped_column(String(40), primary_key=True, index=True)
+    color: Mapped[str] = mapped_column(String(20), default="blue", server_default="blue")
 
+class CardTag(Base):
+    __tablename__ = "card_tags"
+    flashcard_id: Mapped[int] = mapped_column(ForeignKey("flashcards.id", ondelete="CASCADE"), primary_key=True)
+    name: Mapped[str] = mapped_column(String(40), primary_key=True, index=True)
+    color: Mapped[str] = mapped_column(String(20), default="blue", server_default="blue")
 
 class CardReviewState(Base):
     """Current scheduling state, separate from the append-only review history."""
@@ -209,3 +226,15 @@ class NoteUpload(TimestampMixin, Base):
     title: Mapped[str] = mapped_column(String(200))
     filename: Mapped[str] = mapped_column(String(255))
     data: Mapped[bytes] = mapped_column(LargeBinary)
+    
+class CardImage(TimestampMixin, Base):
+    __tablename__ = "card_images"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    flashcard_id: Mapped[int] = mapped_column(
+        ForeignKey("flashcards.id", ondelete="CASCADE"), index=True
+    )
+    # "question" or "answer", so you can show it on either side
+    side: Mapped[str] = mapped_column(String(10), default="question")
+    content_type: Mapped[str] = mapped_column(String(50))  # image/png, etc.
+    data: Mapped[bytes] = mapped_column(LargeBinary, deferred=True)
