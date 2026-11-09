@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app import reviews
 from app.deps import get_current_user, get_session
+from app.quiz_questions import question_data
 from recall_db.models import CardLabel, CardReviewState, Deck, Flashcard, User
 
 router = APIRouter(prefix="/api", tags=["study"])
@@ -40,6 +41,7 @@ class StudyCard(BaseModel):
     deck_title: str
     question: str
     answer: str
+    quiz_ready: bool
     labels: list[str]
     due_at: datetime | None
     status: Literal["new", "due", "upcoming"]
@@ -144,6 +146,7 @@ def study_cards(
         cards.append(StudyCard(
             id=card.id, deck_id=card.deck_id, deck_title=title,
             question=card.question, answer=card.answer, labels=labels[card.id],
+            quiz_ready=question_data(card) is not None,
             due_at=due, status="new" if due is None else "due" if due <= now else "upcoming",
         ))
     return StudyQueue(cards=cards, total=total or 0, offset=offset, limit=limit)

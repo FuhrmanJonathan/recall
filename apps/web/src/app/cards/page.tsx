@@ -8,7 +8,7 @@ import { useLeaveGuard } from "@/components/use-leave-guard";
 import { RequireAuth, useAuth } from "@/components/auth";
 import { Card, btnPrimary, btnSecondary } from "@/components/ui";
 
-type CardData = { id: number; deck_id: number; deck_title: string; question: string; answer: string; labels: string[]; due_at: string | null; status: "new" | "due" | "upcoming" };
+type CardData = { id: number; deck_id: number; deck_title: string; question: string; answer: string; quiz_ready: boolean; labels: string[]; due_at: string | null; status: "new" | "due" | "upcoming" };
 type Queue = { cards: CardData[]; total: number };
 type Mode = "due" | "practice";
 type Rating = "Again" | "Hard" | "Good" | "Easy";
@@ -72,6 +72,7 @@ function Study() {
   const [decks, setDecks] = useState<{ id: number; title: string }[]>([]);
   const [labels, setLabels] = useState<string[]>([]);
   const [queue, setQueue] = useState<Queue>({ cards: [], total: 0 });
+  const quizCards = queue.cards.filter(c => c.quiz_ready);
   const [offset, setOffset] = useState(0);
   const [revision, setRevision] = useState(0);
   const [ready, setReady] = useState(false);
@@ -204,7 +205,7 @@ function Study() {
     return <section className="mx-auto max-w-2xl">
       <div className="flex items-center justify-between gap-4">
         <button disabled={saving} onClick={back} className={btnSecondary + disabled}>← Back to cards</button>
-        {card && <Link href={`/decks/${card.deck_id}/edit?card=${card.id}&from=study`} className="text-sm font-semibold text-accent hover:underline">Edit this card</Link>}
+        {card && <div className="flex items-center gap-3"><Link href={`/decks/${card.deck_id}/edit?card=${card.id}&from=study`} className="text-sm font-semibold text-accent hover:underline">Edit card</Link><Link href={`/quiz/edit/${card.id}`} className="rounded-lg border border-gray-200 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50">Edit quiz</Link></div>}
       </div>
       <div className="mt-7 flex items-end justify-between gap-4"><h1 className="text-3xl font-semibold">{mode === "due" ? "Review" : "Practice"}</h1><p role="status" aria-live="polite" className="text-sm text-gray-600">{card ? `Card ${index + 1} of ${session.length}` : "Complete"}</p></div>
       {card ? <>
@@ -224,7 +225,7 @@ function Study() {
   }
   function filter(action: () => void) { action(); reload(); }
   return <section className="mx-auto max-w-3xl">
-    <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Study</h1>
+    <div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Study</h1><Link href="/quiz/history" className={btnSecondary}>Quiz history &amp; mistakes</Link></div>
     {resumeError && <div role="alert" className="mt-5 rounded-xl bg-amber-50 p-4 text-amber-900"><p>{resumeError}</p><button onClick={() => { window.history.replaceState(window.history.state, "", "/cards?resume=1"); setResumeRevision((value) => value + 1); }} className={`mt-3 ${btnSecondary}`}>Retry returning to study</button></div>}
     <div className="mt-7 grid gap-3 sm:grid-cols-2" role="group" aria-label="Study mode">
       <button aria-pressed={mode === "due"} onClick={() => filter(() => setMode("due"))} className={`rounded-xl border p-5 text-left ${mode === "due" ? "border-accent bg-blue-50 ring-1 ring-accent" : "border-gray-300 bg-white hover:border-accent"}`}><span className="flex items-center justify-between text-base font-semibold">Review due cards<span aria-hidden="true">{mode === "due" ? "●" : "○"}</span></span><span className="mt-2 block text-sm text-gray-600">New cards and cards due now. Ratings update your review schedule.</span></button>
@@ -236,16 +237,16 @@ function Study() {
     </div>
     {loading ? <p role="status" className="mt-8">Loading cards…</p> : error ? <Card className="mt-6 p-5"><p role="alert" className="text-red-700">{error}</p><button onClick={reload} className={`mt-3 ${btnSecondary}`}>Try again</button></Card> : <>
       <div className="my-6 flex flex-wrap items-center justify-between gap-3"><p role="status" className="text-base">{queue.total} {mode === "due" ? "cards ready to review" : "cards to practice"}{queue.total > queue.cards.length && ` · Showing ${offset + 1}–${offset + queue.cards.length}`}</p><button disabled={!queue.cards.length} onClick={() => start()} className={btnPrimary + disabled}>{mode === "due" ? "Start review" : "Start practice"}{queue.cards.length > 0 && ` (${queue.cards.length})`} →</button></div>
-      {queue.cards.length > 0 && <div className="mb-6 flex flex-wrap items-center gap-3"><button disabled={!queue.cards.some(c => quizSelection.includes(c.id))} className={btnSecondary + disabled} onClick={() => { const ids = queue.cards.filter(c => quizSelection.includes(c.id)).map(c => c.id); router.push(`/quiz?cards=${ids.join(",")}`); }}>Create quiz ({queue.cards.filter(c => quizSelection.includes(c.id)).length}) →</button><button className="text-sm text-accent underline" onClick={() => setQuizSelection(queue.cards.every(c => quizSelection.includes(c.id)) ? [] : queue.cards.map(c => c.id))}>{queue.cards.every(c => quizSelection.includes(c.id)) ? "Clear selection" : "Select all on this page"}</button><p className="text-sm text-gray-600">One question per selected card · Sends selected card text to OpenAI · More than 20 requires confirmation</p></div>}
+      {quizCards.length > 0 && <div className="mb-6 flex flex-wrap items-center gap-3"><button disabled={!quizCards.some(c => quizSelection.includes(c.id))} className={btnSecondary + disabled} onClick={() => { const ids = quizCards.filter(c => quizSelection.includes(c.id)).map(c => c.id); router.push(`/quiz?cards=${ids.join(",")}&attempt=${crypto.randomUUID()}`); }}>Create quiz ({quizCards.filter(c => quizSelection.includes(c.id)).length}) →</button><button className="text-sm text-accent underline" onClick={() => setQuizSelection(quizCards.every(c => quizSelection.includes(c.id)) ? [] : quizCards.map(c => c.id))}>{quizCards.every(c => quizSelection.includes(c.id)) ? "Clear selection" : "Select all quiz-ready cards"}</button><p className="text-sm text-gray-600">Up to 100 cards · Uses saved quiz questions · No AI call when starting a quiz</p></div>}
       {!queue.cards.length && <Card className="p-6"><p>{mode === "due" ? "You’re caught up for these filters." : "No cards match these filters."}</p><div className="mt-4 flex flex-wrap gap-3">{mode === "due" && <button onClick={() => filter(() => setMode("practice"))} className={btnPrimary}>Practice these cards instead</button>}<Link href="/decks" className={btnSecondary}>Go to My Decks</Link></div></Card>}
       <div className="space-y-4">{queue.cards.map((card, cardIndex) => <Card key={card.id} className="overflow-hidden">
-        <label className="flex items-center gap-2 px-5 pt-4 text-sm"><input type="checkbox" checked={quizSelection.includes(card.id)} onChange={e => setQuizSelection(ids => e.target.checked ? [...ids, card.id] : ids.filter(id => id !== card.id))} />Select for quiz</label>
+        <label className="flex items-center gap-2 px-5 pt-4 text-sm"><input disabled={!card.quiz_ready} type="checkbox" checked={quizSelection.includes(card.id)} onChange={e => setQuizSelection(ids => e.target.checked ? [...ids, card.id] : ids.filter(id => id !== card.id))} />{card.quiz_ready ? "Select for quiz" : "Use Edit quiz to add a question for this card"}</label>
         <button onClick={() => start(cardIndex)} className="group block w-full p-5 text-left hover:bg-blue-50/50 sm:p-6" aria-label={`${mode === "due" ? "Review" : "Practice"} card: ${card.question}`}>
           <span className="flex flex-wrap justify-between gap-2 text-sm text-gray-600"><span>{card.deck_title}</span><span>{card.status === "new" ? "New" : `${card.status === "due" ? "Due" : "Next review"}: ${new Date(card.due_at!).toLocaleDateString()}`}</span></span>
           <span className="mt-3 block whitespace-pre-wrap break-words text-lg font-semibold leading-7 group-hover:text-accent">{card.question}</span>
           <span className="mt-4 inline-block text-sm font-semibold text-accent">{mode === "due" ? "Review from this card" : "Practice from this card"} →</span>
         </button>
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 px-5 pb-4 sm:px-6"><LabelEditor card={card} onSaved={reload} /><Link href={`/decks/${card.deck_id}/edit?card=${card.id}`} className="mt-3 text-sm font-semibold text-accent hover:underline">Edit this card</Link></div>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 px-5 pb-4 sm:px-6"><LabelEditor card={card} onSaved={reload} /><div className="mt-3 flex items-center gap-3"><Link href={`/decks/${card.deck_id}/edit?card=${card.id}`} className="text-sm font-semibold text-accent hover:underline">Edit card</Link><Link href={`/quiz/edit/${card.id}`} className="rounded-lg border border-gray-200 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50">Edit quiz</Link></div></div>
       </Card>)}</div>
       {queue.total > 100 && <div className="mt-6 flex flex-wrap items-center gap-3"><button disabled={offset === 0} className={btnSecondary + disabled} onClick={() => { setQuizSelection([]); setLoading(true); setOffset(Math.max(0, offset - 100)); }}>← Previous 100</button><button disabled={offset + queue.cards.length >= queue.total} className={btnSecondary + disabled} onClick={() => { setQuizSelection([]); setLoading(true); setOffset(offset + 100); }}>Next 100 →</button></div>}
     </>}

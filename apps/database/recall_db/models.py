@@ -1,7 +1,7 @@
 from datetime import date, datetime, time
 
 from sqlalchemy import (CheckConstraint, Date, DateTime, Float, ForeignKey, Integer,
-    LargeBinary, String, Text, Time, UniqueConstraint, func,
+    JSON, LargeBinary, String, Text, Time, UniqueConstraint, func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -85,10 +85,44 @@ class Flashcard(TimestampMixin, Base):
     # Set when OCR / generation was unsure about this card; cleared once the student edits it.
     needs_review: Mapped[bool] = mapped_column(default=False, server_default="0")
     # Key term hidden in the fill-in-the-blank quiz, picked when the card was generated.
-    # NULL means the quiz asks the AI to pick one (manual cards, older decks).
+    # Cards without a valid saved blank cannot be used in a quiz.
     cloze_blank: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     deck: Mapped[Deck] = relationship(back_populates="flashcards")
+    quiz_question: Mapped["QuizQuestion | None"] = relationship(
+        back_populates="card", cascade="all, delete-orphan", lazy="selectin")
+
+
+class QuizQuestion(Base):
+    """An editable quiz question independent of the card's study content."""
+    __tablename__ = "quiz_questions"
+    flashcard_id: Mapped[int] = mapped_column(ForeignKey("flashcards.id", ondelete="CASCADE"), primary_key=True)
+    question: Mapped[str] = mapped_column(Text)
+    answer: Mapped[str] = mapped_column(Text)
+    context: Mapped[str] = mapped_column(Text, default="")
+    version: Mapped[int] = mapped_column(default=1)
+    card: Mapped[Flashcard] = relationship(back_populates="quiz_question")
+
+
+class QuizRun(TimestampMixin, Base):
+    """Frozen questions and completed results, independent of mutable source cards."""
+
+    __tablename__ = "quiz_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    parent_id: Mapped[str | None] = mapped_column(
+        ForeignKey("quiz_runs.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    mode: Mapped[str] = mapped_column(String(16))  # cards / missed / repeat
+    request_hash: Mapped[str] = mapped_column(String(64))
+    # IDs inside the snapshots are provenance, not foreign keys: deleting a card
+    # must not delete a learner's past answers.
+    exercises: Mapped[list[dict]] = mapped_column(JSON)
+    attempts: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
 
 
 class StudyActivity(Base):

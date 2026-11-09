@@ -21,6 +21,7 @@ from app.documents import (
     detect_source_kind,
     extract_docx_text,
 )
+from app.quiz_questions import preserve_question
 from app.flashcards import (
     TAG_MODES,
     CardDraft,
@@ -204,6 +205,7 @@ def update_deck(
                                   answer=draft.answer, needs_review=draft.needs_review))
         else:
             card = existing[draft.id]
+            preserve_question(card)
             card.question = draft.question
             card.answer = draft.answer
             card.needs_review = draft.needs_review
@@ -247,6 +249,7 @@ def update_flashcard(
 
     # Single-card edits must also invalidate open whole-deck editors.
     session.execute(update(Deck).where(Deck.id == card.deck_id).values(version=Deck.version + 1))
+    preserve_question(card)
     if "question" in changes:
         card.question = changes["question"]
     if "answer" in changes:
@@ -323,6 +326,8 @@ def _save_deck(
         )
         for card in cards
     ]
+    for flashcard in flashcards:
+        preserve_question(flashcard)
     deck.flashcards.extend(flashcards)
     session.add(deck)
     session.flush()  # assigns card ids so labels can point at them
