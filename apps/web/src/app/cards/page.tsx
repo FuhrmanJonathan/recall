@@ -7,6 +7,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useLeaveGuard } from "@/components/use-leave-guard";
 import { RequireAuth, useAuth } from "@/components/auth";
 import { Card, btnPrimary, btnSecondary } from "@/components/ui";
+import StudyFocus from "@/components/study-focus";
+import { defaultSelection, readSelection, selectionFromUrl, selectionParams, shuffled, type StudySelection } from "@/lib/study-selection";
 
 type CardData = { id: number; deck_id: number; deck_title: string; question: string; answer: string; quiz_ready: boolean; labels: string[]; due_at: string | null; status: "new" | "due" | "upcoming" };
 type Queue = { cards: CardData[]; total: number };
@@ -55,21 +57,21 @@ function LabelEditor({ card, onSaved }: { card: CardData; onSaved: () => void })
   </div>;
 }
 
-type StudySnapshot = { mode: Mode; deckId: string; label: string; offset: number; session: CardData[]; index: number };
+type StudySnapshot = { mode: Mode; selection?: StudySelection; deckId?: string; label?: string; offset: number; session: CardData[]; index: number };
 
 function Study() {
   const router = useRouter();
   const [quizSelection, setQuizSelection] = useState<number[]>([]);
   const { user } = useAuth();
   const sessionKey = `recall:study:${user?.id}`;
+  const selectionKey = `recall:study-selection:${user?.id}`;
   const cardRef = useRef<HTMLButtonElement>(null);
   const completedRef = useRef<HTMLHeadingElement>(null);
   const [resumeError, setResumeError] = useState("");
   const [resumeRevision, setResumeRevision] = useState(0);
   const [mode, setMode] = useState<Mode>("due");
-  const [deckId, setDeckId] = useState("");
-  const [label, setLabel] = useState("");
-  const [decks, setDecks] = useState<{ id: number; title: string }[]>([]);
+  const [selection, setSelection] = useState<StudySelection>(defaultSelection);
+  const [decks, setDecks] = useState<{ id: number; title: string; card_count: number }[]>([]);
   const [labels, setLabels] = useState<string[]>([]);
   const [queue, setQueue] = useState<Queue>({ cards: [], total: 0 });
   const quizCards = queue.cards.filter(c => c.quiz_ready);
@@ -91,9 +93,11 @@ function Study() {
     async function initialize() {
       const params = new URLSearchParams(window.location.search);
       setReady(false); setResumeError("");
-      setDeckId(params.get("deck") ?? "");
+      setSession(null); setIndex(0); setFlipped(false);
+      let remembered = defaultSelection;
+      try { remembered = readSelection(JSON.parse(localStorage.getItem(selectionKey) ?? "null")); } catch { /* Preferences are optional when storage is unavailable. */ }
+      setSelection(selectionFromUrl(params, remembered));
       setMode(params.get("mode") === "practice" ? "practice" : "due");
-      setLabel(params.get("label") ?? "");
       if (params.get("resume") === "1") {
         try {
           const saved: StudySnapshot | null = JSON.parse(sessionStorage.getItem(sessionKey) ?? "null");
@@ -111,7 +115,7 @@ function Study() {
             return { ...card, question: fresh.question, answer: fresh.answer, deck_title: fresh.title };
           });
           if (controller.signal.aborted) return;
-          setMode(saved.mode); setDeckId(saved.deckId); setLabel(saved.label); setOffset(saved.offset);
+          setMode(saved.mode); setSelection(readSelection(saved.selection ?? { deckIds: saved.deckId ? [saved.deckId] : [], tags: saved.label ? [saved.label] : [] })); setOffset(saved.offset);
           setIndex(0); setFlipped(false); setSession(restored.length ? restored : null);
         } catch (e) {
           if (!controller.signal.aborted) setResumeError(e instanceof Error ? e.message : "Could not restore your session. Your saved cards are safe.");
@@ -120,12 +124,12 @@ function Study() {
       if (!controller.signal.aborted) setReady(true);
     }
     void initialize(); return () => controller.abort();
-  }, [sessionKey, resumeRevision]);
+  }, [sessionKey, selectionKey, resumeRevision]);
 
   useEffect(() => {
     if (!ready || !session) return;
-    try { sessionStorage.setItem(sessionKey, JSON.stringify({ mode, deckId, label, offset, session, index } satisfies StudySnapshot)); } catch { /* Storage may be disabled. */ }
-  }, [ready, session, index, mode, deckId, label, offset, sessionKey]);
+    try { sessionStorage.setItem(sessionKey, JSON.stringify({ mode, selection, offset, session, index } satisfies StudySnapshot)); } catch { /* Storage may be disabled. */ }
+  }, [ready, session, index, mode, selection, offset, sessionKey]);
 
   useEffect(() => {
     if (!session) return;
@@ -135,21 +139,20 @@ function Study() {
 
   useEffect(() => {
     if (!ready || session) return;
-    const params = new URLSearchParams();
-    if (deckId) params.set("deck", deckId);
+    const params = selectionParams(selection);
     if (mode === "practice") params.set("mode", mode);
-    if (label) params.set("label", label);
     window.history.replaceState(window.history.state, "", `/cards${params.size ? `?${params}` : ""}`);
-  }, [ready, session, mode, deckId, label]);
+    try { localStorage.setItem(selectionKey, JSON.stringify(selection)); } catch { /* The current selection still works without browser storage. */ }
+  }, [ready, session, mode, selection, selectionKey]);
   useEffect(() => {
     if (!ready) return;
     const controller = new AbortController();
     async function load() {
       setLoading(true); setError("");
       try {
-        const params = new URLSearchParams({ mode, offset: String(offset), limit: "100" });
-        if (deckId) params.set("deck_id", deckId);
-        if (label) params.set("label", label);
+        const params = new URLSearchParams({ mode, offset: String(offset), limit: String(selection.size) });
+        selection.deckIds.forEach(id => params.append("deck_ids", id));
+        selection.tags.forEach(tag => params.append("labels", tag));
         const options = { signal: controller.signal, cache: "no-store" as const };
         const [nextQueue, nextDecks, nextLabels] = await Promise.all([
           fetch(`/api/study/cards?${params}`, options).then(check), fetch("/api/decks", options).then(check), fetch("/api/labels", options).then(check),
@@ -160,15 +163,18 @@ function Study() {
     }
     void load();
     return () => controller.abort();
-  }, [ready, mode, deckId, label, offset, revision]);
+  }, [ready, mode, selection, offset, revision]);
   function reload() { setQuizSelection([]); setOffset(0); setLoading(true); setRevision((value) => value + 1); }
   function back() {
     if (lock.current) return;
     try { sessionStorage.removeItem(sessionKey); } catch { /* Storage may be disabled. */ }
     setSession(null); setIndex(0); setFlipped(false); setSaveError(""); setConflict(false); reload();
   }
-  function start(startIndex = 0) {
-    setSession(queue.cards.slice(startIndex)); setIndex(0); setFlipped(false);
+  function start(startIndex?: number) {
+    const cards = queue.cards.slice(startIndex ?? 0);
+    if (!cards.length) return;
+    // Opening a particular card still starts there, even with shuffle enabled.
+    setSession(selection.shuffle ? startIndex === undefined ? shuffled(cards) : [cards[0], ...shuffled(cards.slice(1))] : cards); setIndex(0); setFlipped(false);
     setSaveError(""); setConflict(false);
     window.scrollTo({ top: 0 });
   }
@@ -231,10 +237,7 @@ function Study() {
       <button aria-pressed={mode === "due"} onClick={() => filter(() => setMode("due"))} className={`rounded-xl border p-5 text-left ${mode === "due" ? "border-accent bg-blue-50 ring-1 ring-accent" : "border-gray-300 bg-white hover:border-accent"}`}><span className="flex items-center justify-between text-base font-semibold">Review due cards<span aria-hidden="true">{mode === "due" ? "●" : "○"}</span></span><span className="mt-2 block text-sm text-gray-600">New cards and cards due now. Ratings update your review schedule.</span></button>
       <button aria-pressed={mode === "practice"} onClick={() => filter(() => setMode("practice"))} className={`rounded-xl border p-5 text-left ${mode === "practice" ? "border-accent bg-blue-50 ring-1 ring-accent" : "border-gray-300 bg-white hover:border-accent"}`}><span className="flex items-center justify-between text-base font-semibold">Practice all cards<span aria-hidden="true">{mode === "practice" ? "●" : "○"}</span></span><span className="mt-2 block text-sm text-gray-600">Include cards that aren’t due. Your review schedule stays the same.</span></button>
     </div>
-    <div className="mt-6 grid gap-4 sm:grid-cols-2">
-      <label className="text-sm font-medium">Deck<select value={deckId} onChange={(e) => filter(() => setDeckId(e.target.value))} className={`${inputStyle} mt-2 block w-full`}><option value="">All decks</option>{decks.map((deck) => <option key={deck.id} value={String(deck.id)}>{deck.title}</option>)}</select></label>
-      <label className="text-sm font-medium">Label<select value={label} onChange={(e) => filter(() => setLabel(e.target.value))} className={`${inputStyle} mt-2 block w-full`}><option value="">All labels</option>{[...new Set([...labels, ...(label ? [label] : [])])].sort().map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
-    </div>
+    <div className="mt-6"><StudyFocus selection={selection} decks={decks} tags={labels} loading={loading} error={!!error} count={queue.total} onChange={next => filter(() => setSelection(next))} /></div>
     {loading ? <p role="status" className="mt-8">Loading cards…</p> : error ? <Card className="mt-6 p-5"><p role="alert" className="text-red-700">{error}</p><button onClick={reload} className={`mt-3 ${btnSecondary}`}>Try again</button></Card> : <>
       <div className="my-6 flex flex-wrap items-center justify-between gap-3"><p role="status" className="text-base">{queue.total} {mode === "due" ? "cards ready to review" : "cards to practice"}{queue.total > queue.cards.length && ` · Showing ${offset + 1}–${offset + queue.cards.length}`}</p><button disabled={!queue.cards.length} onClick={() => start()} className={btnPrimary + disabled}>{mode === "due" ? "Start review" : "Start practice"}{queue.cards.length > 0 && ` (${queue.cards.length})`} →</button></div>
       {quizCards.length > 0 && <div className="mb-6 flex flex-wrap items-center gap-3"><button disabled={!quizCards.some(c => quizSelection.includes(c.id))} className={btnSecondary + disabled} onClick={() => { const ids = quizCards.filter(c => quizSelection.includes(c.id)).map(c => c.id); router.push(`/quiz?cards=${ids.join(",")}&attempt=${crypto.randomUUID()}`); }}>Create quiz ({quizCards.filter(c => quizSelection.includes(c.id)).length}) →</button><button className="text-sm text-accent underline" onClick={() => setQuizSelection(quizCards.every(c => quizSelection.includes(c.id)) ? [] : quizCards.map(c => c.id))}>{quizCards.every(c => quizSelection.includes(c.id)) ? "Clear selection" : "Select all quiz-ready cards"}</button><p className="text-sm text-gray-600">Up to 100 cards · Uses saved quiz questions · No AI call when starting a quiz</p></div>}
@@ -248,7 +251,7 @@ function Study() {
         </button>
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 px-5 pb-4 sm:px-6"><LabelEditor card={card} onSaved={reload} /><div className="mt-3 flex items-center gap-3"><Link href={`/decks/${card.deck_id}/edit?card=${card.id}`} className="text-sm font-semibold text-accent hover:underline">Edit card</Link><Link href={`/quiz/edit/${card.id}`} className="rounded-lg border border-gray-200 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50">Edit quiz</Link></div></div>
       </Card>)}</div>
-      {queue.total > 100 && <div className="mt-6 flex flex-wrap items-center gap-3"><button disabled={offset === 0} className={btnSecondary + disabled} onClick={() => { setQuizSelection([]); setLoading(true); setOffset(Math.max(0, offset - 100)); }}>← Previous 100</button><button disabled={offset + queue.cards.length >= queue.total} className={btnSecondary + disabled} onClick={() => { setQuizSelection([]); setLoading(true); setOffset(offset + 100); }}>Next 100 →</button></div>}
+      {queue.total > selection.size && <div className="mt-6 flex flex-wrap items-center gap-3"><button disabled={offset === 0} className={btnSecondary + disabled} onClick={() => { setQuizSelection([]); setLoading(true); setOffset(Math.max(0, offset - selection.size)); }}>← Previous {selection.size}</button><button disabled={offset + queue.cards.length >= queue.total} className={btnSecondary + disabled} onClick={() => { setQuizSelection([]); setLoading(true); setOffset(offset + selection.size); }}>Next {selection.size} →</button></div>}
     </>}
   </section>;
 }

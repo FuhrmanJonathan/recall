@@ -83,6 +83,14 @@ After revealing an answer in **Review due cards**, press **1 Again**, **2 Hard**
 
 The library checks `/api/flashcards/status` before offering generation. This reports configuration, not credential validity. Reminder preferences can be saved independently of email delivery; delivering reminders still requires the email configuration and reminder service.
 
+### Choosing study material
+
+On **Study**, use **What do you want to study?** to search and select multiple decks or tags. Cards match any selected deck and any selected tag; choosing both groups narrows the result to tagged cards inside those decks. The matching count updates before starting. Clear the selection to return to all cards. Choices are remembered per account in this browser; direct **Study this deck** links override the remembered focus.
+
+**Session options** controls the batch size (default 20, maximum 100) and optionally shuffles the order within that batch. Cards are selected oldest-due first; practice also includes upcoming cards and leaves scheduling unchanged. Pagination follows the batch size. Returning from the card editor restores the same selection and remaining session.
+
+`GET /api/study/cards` accepts repeated `deck_ids` and `labels` parameters, alongside the existing singular `deck_id` and `label`. Decks must all belong to the signed-in user. Tag matches are deduplicated, so a card with several selected tags appears once.
+
 ### Daily study goals
 
 The dashboard starts with a daily target of 20 cards in the browser’s time zone. **Edit goal** opens a compact dialog with a single target control (1–1,000 cards). Saving stores the target per account and detects the browser’s time zone automatically. The progress bar counts successfully saved due-card reviews; free practice, quizzes, and manually recorded activity do not count. Yogo celebrates once the target is reached, and progress resets at midnight in the saved time zone, including daylight-saving changes. Returning to the dashboard, focusing its tab, or leaving it open refreshes progress automatically.

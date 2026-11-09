@@ -140,3 +140,53 @@ def test_additive_schema_and_cascade(tmp_path):
             assert session.scalars(select(CardLabel)).all() == []
     finally:
         engine.dispose()
+
+
+def test_multiple_decks_and_tags_use_union_within_groups_and_intersection_between(setup):
+    client, engine, (owner, other, first_card) = setup
+    (overdue, boundary, future), second_deck, _, _ = populate(engine, owner, other)
+    with Session(engine) as session:
+        first_deck = session.get(Flashcard, first_card).deck_id
+        extra = Flashcard(deck=Deck(user_id=owner, title="Unselected"), question="Other", answer="A")
+        session.add(extra)
+        session.flush()
+        for card, tags in [(first_card, ["midterm 2"]), (overdue, ["midterm 2", "biology"]),
+                           (boundary, ["chapter 6"]), (future, ["midterm 2"]), (extra.id, ["midterm 2"])]:
+            session.add_all([CardLabel(flashcard_id=card, name=tag) for tag in tags])
+        session.commit()
+    params = [("deck_ids", first_deck), ("deck_ids", second_deck),
+              ("labels", "MIDTERM 2"), ("labels", "chapter 6"), ("labels", "midterm 2")]
+    result = client.get("/api/study/cards", headers=AUTH, params=params)
+    assert result.status_code == 200
+    assert result.json()["total"] == 3
+    assert [c["id"] for c in result.json()["cards"]] == [overdue, boundary, first_card]
+    # Two matching tags on one card still return one card and one count.
+    dedup = get(client, "?labels=midterm%202&labels=biology").json()
+    assert len({c["id"] for c in dedup["cards"]}) == dedup["total"] == 3
+    practice = client.get("/api/study/cards", headers=AUTH, params=params + [("mode", "practice")]).json()
+    assert practice["total"] == 4 and future in [c["id"] for c in practice["cards"]]
+    with Session(engine) as session:
+        assert session.scalars(select(Review)).all() == []
+
+
+def test_multi_selection_ownership_empty_results_and_pagination(setup):
+    client, engine, (owner, other, card) = setup
+    (overdue, boundary, _), deck, _, foreign_deck = populate(engine, owner, other)
+    assert get(client, f"?deck_ids={deck}&deck_ids={foreign_deck}").status_code == 404
+    assert get(client, f"?deck_ids={deck}&deck_ids=999999").status_code == 404
+    assert get(client, "?deck_ids=0").status_code == 422
+    assert get(client, "?labels=%20").status_code == 422
+    assert get(client, f"?deck_ids={deck}&labels=nonexistent").json()["total"] == 0
+    first = get(client, f"?deck_ids={deck}&limit=1").json()
+    second = get(client, f"?deck_ids={deck}&limit=1&offset=1").json()
+    assert first["total"] == second["total"] == 2
+    assert [c["id"] for c in first["cards"]] == [overdue]
+    assert [c["id"] for c in second["cards"]] == [boundary]
+    # Legacy links still filter correctly alongside the new query format.
+    assert get(client, f"?deck_id={deck}").json()["total"] == 2
+
+
+@pytest.mark.parametrize("query", ["&".join(["deck_ids=1"] * 51), "&".join(["labels=test"] * 31)])
+def test_selection_limits(setup, query):
+    client, _, _ = setup
+    assert get(client, f"?{query}").status_code == 422
