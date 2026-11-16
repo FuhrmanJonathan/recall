@@ -3,7 +3,7 @@
 import importlib.util
 import os
 from pathlib import PurePath
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -48,6 +48,14 @@ _SIZE_LIMITS = {
 }
 
 
+class ImageOut(BaseModel):
+    """Image metadata only. The bytes are served by GET /api/images/{id}."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    side: str
+
+
 class CardOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -55,6 +63,7 @@ class CardOut(BaseModel):
     question: str
     answer: str
     needs_review: bool = False
+    images: list[ImageOut] = []  #images
 
 
 class DeckOut(BaseModel):
@@ -160,6 +169,7 @@ class DeckCardIn(BaseModel):
     question: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2_000)]
     answer: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=5_000)]
     needs_review: bool = False
+    images: list[Any] = Field(default_factory=list, exclude=True)
 
 
 class DeckUpdate(BaseModel):
@@ -194,7 +204,7 @@ def update_deck(
     if claimed.rowcount != 1:
         session.rollback()
         raise HTTPException(409, "This deck changed in another tab. Your edits have not been saved. Copy anything you need, then reload the latest deck.")
-    # Deletions cascade to labels and reviews.
+    # Deletions cascade to labels, images, and reviews.
     kept = set(ids)
     for card_id, card in existing.items():
         if card_id not in kept:
