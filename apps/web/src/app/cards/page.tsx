@@ -177,16 +177,9 @@ function Study() {
   const [resumeError, setResumeError] = useState("");
   const [resumeRevision, setResumeRevision] = useState(0);
   const [mode, setMode] = useState<Mode>("due");
-<<<<<<< HEAD
-  const [deckId, setDeckId] = useState("");
-  const [label, setLabel] = useState("");
-  const [decks, setDecks] = useState<{ id: number; title: string }[]>([]);
-  const [labels, setLabels] = useState<LabelInfo[]>([]);
-=======
   const [selection, setSelection] = useState<StudySelection>(defaultSelection);
   const [decks, setDecks] = useState<{ id: number; title: string; card_count: number }[]>([]);
-  const [labels, setLabels] = useState<string[]>([]);
->>>>>>> 06797267a1c414c3623ce1a38e772c64cb088750
+  const [labels, setLabels] = useState<LabelInfo[]>([]);
   const [queue, setQueue] = useState<Queue>({ cards: [], total: 0 });
   const quizCards = queue.cards.filter(c => c.quiz_ready);
   const [offset, setOffset] = useState(0);
@@ -269,7 +262,7 @@ function Study() {
         selection.tags.forEach(tag => params.append("labels", tag));
         const options = { signal: controller.signal, cache: "no-store" as const };
         const [nextQueue, nextDecks, nextLabels] = await Promise.all([
-          fetch(`/api/study/cards?${params}`, options).then(check), fetch("/api/decks", options).then(check), fetch("/api/labels", options).then(check),
+          fetch(`/api/study/cards?${params}`, options).then(check), fetch("/api/decks", options).then(check), fetch("/api/labels?colors=true", options).then(check),
         ]);
         if (!controller.signal.aborted) { setQueue(nextQueue); setDecks(nextDecks); setLabels(nextLabels); }
       } catch (e) { if (!controller.signal.aborted) setError(e instanceof Error ? e.message : "Could not load cards."); }
@@ -351,14 +344,7 @@ function Study() {
       <button aria-pressed={mode === "due"} onClick={() => filter(() => setMode("due"))} className={`rounded-xl border p-5 text-left ${mode === "due" ? "border-accent bg-blue-50 ring-1 ring-accent" : "border-gray-300 bg-white hover:border-accent"}`}><span className="flex items-center justify-between text-base font-semibold">Review due cards<span aria-hidden="true">{mode === "due" ? "●" : "○"}</span></span><span className="mt-2 block text-sm text-gray-600">New cards and cards due now. Ratings update your review schedule.</span></button>
       <button aria-pressed={mode === "practice"} onClick={() => filter(() => setMode("practice"))} className={`rounded-xl border p-5 text-left ${mode === "practice" ? "border-accent bg-blue-50 ring-1 ring-accent" : "border-gray-300 bg-white hover:border-accent"}`}><span className="flex items-center justify-between text-base font-semibold">Practice all cards<span aria-hidden="true">{mode === "practice" ? "●" : "○"}</span></span><span className="mt-2 block text-sm text-gray-600">Include cards that aren’t due. Your review schedule stays the same.</span></button>
     </div>
-<<<<<<< HEAD
-    <div className="mt-6 grid gap-4 sm:grid-cols-2">
-      <label className="text-sm font-medium">Deck<select value={deckId} onChange={(e) => filter(() => setDeckId(e.target.value))} className={`${inputStyle} mt-2 block w-full`}><option value="">All decks</option>{decks.map((deck) => <option key={deck.id} value={String(deck.id)}>{deck.title}</option>)}</select></label>
-      <label className="text-sm font-medium">Label<select value={label} onChange={(e) => filter(() => setLabel(e.target.value))} className={`${inputStyle} mt-2 block w-full`}><option value="">All labels</option>{[...new Set([...labels.map((l) => l.name), ...(label ? [label] : [])])].sort().map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
-    </div>
-=======
-    <div className="mt-6"><StudyFocus selection={selection} decks={decks} tags={labels} loading={loading} error={!!error} count={queue.total} onChange={next => filter(() => setSelection(next))} /></div>
->>>>>>> 06797267a1c414c3623ce1a38e772c64cb088750
+    <div className="mt-6"><StudyFocus selection={selection} decks={decks} tags={labels.map(label => label.name)} loading={loading} error={!!error} count={queue.total} onChange={next => filter(() => setSelection(next))} /></div>
     {loading ? <p role="status" className="mt-8">Loading cards…</p> : error ? <Card className="mt-6 p-5"><p role="alert" className="text-red-700">{error}</p><button onClick={reload} className={`mt-3 ${btnSecondary}`}>Try again</button></Card> : <>
       <div className="my-6 flex flex-wrap items-center justify-between gap-3"><p role="status" className="text-base">{queue.total} {mode === "due" ? "cards ready to review" : "cards to practice"}{queue.total > queue.cards.length && ` · Showing ${offset + 1}–${offset + queue.cards.length}`}</p><button disabled={!queue.cards.length} onClick={() => start()} className={btnPrimary + disabled}>{mode === "due" ? "Start review" : "Start practice"}{queue.cards.length > 0 && ` (${queue.cards.length})`} →</button></div>
       {quizCards.length > 0 && <div className="mb-6 flex flex-wrap items-center gap-3"><button disabled={!quizCards.some(c => quizSelection.includes(c.id))} className={btnSecondary + disabled} onClick={() => { const ids = quizCards.filter(c => quizSelection.includes(c.id)).map(c => c.id); router.push(`/quiz?cards=${ids.join(",")}&attempt=${crypto.randomUUID()}`); }}>Create quiz ({quizCards.filter(c => quizSelection.includes(c.id)).length}) →</button><button className="text-sm text-accent underline" onClick={() => setQuizSelection(quizCards.every(c => quizSelection.includes(c.id)) ? [] : quizCards.map(c => c.id))}>{quizCards.every(c => quizSelection.includes(c.id)) ? "Clear selection" : "Select all quiz-ready cards"}</button><p className="text-sm text-gray-600">Up to 100 cards · Uses saved quiz questions · No AI call when starting a quiz</p></div>}
@@ -370,11 +356,7 @@ function Study() {
           <span className="mt-3 block whitespace-pre-wrap break-words text-lg font-semibold leading-7 group-hover:text-accent">{card.question}</span>
           <span className="mt-4 inline-block text-sm font-semibold text-accent">{mode === "due" ? "Review from this card" : "Practice from this card"} →</span>
         </button>
-<<<<<<< HEAD
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 px-5 pb-4 sm:px-6"><LabelEditor card={card} allLabels={labels} onSaved={reload} /><Link href={`/decks/${card.deck_id}/edit?card=${card.id}`} className="mt-3 text-sm font-semibold text-accent hover:underline">Edit this card</Link></div>
-=======
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 px-5 pb-4 sm:px-6"><LabelEditor card={card} onSaved={reload} /><div className="mt-3 flex items-center gap-3"><Link href={`/decks/${card.deck_id}/edit?card=${card.id}`} className="text-sm font-semibold text-accent hover:underline">Edit card</Link><Link href={`/quiz/edit/${card.id}`} className="rounded-lg border border-gray-200 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50">Edit quiz</Link></div></div>
->>>>>>> 06797267a1c414c3623ce1a38e772c64cb088750
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 px-5 pb-4 sm:px-6"><LabelEditor card={card} allLabels={labels} onSaved={reload} /><div className="mt-3 flex items-center gap-3"><Link href={`/decks/${card.deck_id}/edit?card=${card.id}`} className="text-sm font-semibold text-accent hover:underline">Edit card</Link><Link href={`/quiz/edit/${card.id}`} className="rounded-lg border border-gray-200 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50">Edit quiz</Link></div></div>
       </Card>)}</div>
       {queue.total > selection.size && <div className="mt-6 flex flex-wrap items-center gap-3"><button disabled={offset === 0} className={btnSecondary + disabled} onClick={() => { setQuizSelection([]); setLoading(true); setOffset(Math.max(0, offset - selection.size)); }}>← Previous {selection.size}</button><button disabled={offset + queue.cards.length >= queue.total} className={btnSecondary + disabled} onClick={() => { setQuizSelection([]); setLoading(true); setOffset(offset + selection.size); }}>Next {selection.size} →</button></div>}
     </>}

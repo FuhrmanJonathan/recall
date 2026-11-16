@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app import reviews
 from app.deps import get_current_user, get_session
 from app.quiz_questions import question_data
-from recall_db.models import CardLabel, CardReviewState, Deck, Flashcard, User
+from recall_db.models import COLORS, CardLabel, CardReviewState, Deck, Flashcard, User
 
 router = APIRouter(prefix="/api", tags=["study"])
 
@@ -25,14 +25,35 @@ def normalize_label(value: str) -> str:
     return value
 
 
+class ColoredLabel(BaseModel):
+    name: str
+    color: str = "blue"
+
+    @field_validator("name")
+    @classmethod
+    def clean_name(cls, value: str) -> str:
+        return normalize_label(value)
+
+    @field_validator("color")
+    @classmethod
+    def clean_color(cls, value: str) -> str:
+        if value not in COLORS:
+            raise ValueError("Unknown label color.")
+        return value
+
+
 class LabelsIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    labels: list[str] = Field(max_length=10)
+    labels: list[str | ColoredLabel] = Field(max_length=10)
 
     @field_validator("labels")
     @classmethod
-    def clean_labels(cls, labels: list[str]) -> list[str]:
-        return sorted({normalize_label(label) for label in labels})
+    def clean_labels(cls, labels):
+        result = {}
+        for label in labels:
+            name = normalize_label(label) if isinstance(label, str) else label.name
+            result[name] = name if isinstance(label, str) else label
+        return [result[name] for name in sorted(result)]
 
 
 class StudyCard(BaseModel):
@@ -54,13 +75,21 @@ class StudyQueue(BaseModel):
     limit: int
 
 
-@router.get("/labels", response_model=list[str])
+@router.get("/labels", response_model=list[str] | list[ColoredLabel])
 def list_labels(
     response: Response,
+    colors: bool = False,
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
     response.headers["Cache-Control"] = "no-store"
+    if colors:
+        rows = session.execute(select(CardLabel.name, CardLabel.color).join(Flashcard).join(Deck)
+            .where(Deck.user_id == user.id).order_by(CardLabel.name, CardLabel.flashcard_id)).all()
+        unique = {}
+        for name, color in rows:
+            unique.setdefault(name, ColoredLabel(name=name, color=color))
+        return list(unique.values())
     return session.scalars(
         select(CardLabel.name).join(Flashcard).join(Deck)
         .where(Deck.user_id == user.id).distinct().order_by(CardLabel.name)
@@ -80,7 +109,9 @@ def set_labels(
         raise HTTPException(404, "Flashcard not found.")
     try:
         session.execute(delete(CardLabel).where(CardLabel.flashcard_id == card.id))
-        session.add_all([CardLabel(flashcard_id=card.id, name=name) for name in body.labels])
+        session.add_all([CardLabel(flashcard_id=card.id,
+            name=label if isinstance(label, str) else label.name,
+            color="blue" if isinstance(label, str) else label.color) for label in body.labels])
         session.commit()
     except IntegrityError as exc:
         session.rollback()

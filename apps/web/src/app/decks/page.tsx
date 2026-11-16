@@ -6,9 +6,10 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useLeaveGuard } from "@/components/use-leave-guard";
 import { RequireAuth } from "@/components/auth";
 import { Card, btnPrimary, btnSecondary } from "@/components/ui";
+import { csvActionLabel, csvFileError, type CsvPreview } from "@/lib/csv-transfer";
 
 type Item = { id: number; title: string; created_at: string; card_count: number; flagged_count: number };
-type Mode = "manual" | "generate" | "notes";
+type Mode = "manual" | "generate" | "notes" | "csv";
 type GenerationStatus = { configured: boolean; images_available: boolean };
 const field = "mt-2 block w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-base";
 
@@ -26,6 +27,7 @@ function Library() {
   const [open, setOpen] = useState(false);
   const [createError, setCreateError] = useState("");
   const [message, setMessage] = useState("");
+  const [csvPreview, setCsvPreview] = useState<CsvPreview | null>(null);
   useLeaveGuard(false, busy);
   const lock = useRef(false);
   const titleRef = useRef<HTMLInputElement>(null);
@@ -61,12 +63,18 @@ function Library() {
     if (mode === "generate" && !generation?.configured) return;
     if (mode !== "manual") {
       const file = body.get("file") as File;
-      const limit = mode === "notes" ? 5 * 1024 * 1024 : /\.(pdf|docx)$/i.test(file?.name ?? "") ? 20_000_000 : /\.(txt|md)$/i.test(file?.name ?? "") ? 1_000_000 : 10_000_000;
-      if (!file?.size || file.size > limit) { setCreateError("Choose a nonempty file within the size limit shown below."); return; }
+      if (mode === "csv") {
+        const csvError = csvFileError(file);
+        if (csvError) { setCreateError(csvError); return; }
+      } else {
+        const limit = mode === "notes" ? 5 * 1024 * 1024 : /\.(pdf|docx)$/i.test(file?.name ?? "") ? 20_000_000 : /\.(txt|md)$/i.test(file?.name ?? "") ? 1_000_000 : 10_000_000;
+        if (!file?.size || file.size > limit) { setCreateError("Choose a nonempty file within the size limit shown below."); return; }
+      }
     }
     lock.current = true; setBusy(true); setCreateError(""); setMessage("");
     try {
-      const res = await fetch(mode === "manual" ? "/api/decks" : mode === "generate" ? "/api/flashcards/generate" : "/api/notes", mode === "manual" ? {
+      const endpoint = mode === "manual" ? "/api/decks" : mode === "generate" ? "/api/flashcards/generate" : mode === "notes" ? "/api/notes" : csvPreview ? "/api/csv/import" : "/api/csv/preview";
+      const res = await fetch(endpoint, mode === "manual" ? {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title }),
       } : { method: "POST", body });
       const result = await res.json().catch(() => ({}));
@@ -75,6 +83,8 @@ function Library() {
         if (mode === "generate" && res.status >= 500) throw new Error("Could not generate cards right now. Your file is still selected. Try again, or choose Write cards to create your deck yourself.");
         throw new Error(typeof result.detail === "string" ? result.detail : "Could not save. Your form is still here; please try again.");
       }
+      if (mode === "csv" && !csvPreview) { setCsvPreview(result); return; }
+      if (mode === "csv") { router.push(`/decks/${result.id}`); return; }
       if (mode !== "notes") { router.push(`/decks/${result.id}/edit${mode === "manual" ? "?add=1" : ""}`); return; }
       setNotes((current) => [result, ...current]); form.reset(); setOpen(false);
       setMessage("Notes saved. This keeps the original file; it does not create flashcards.");
@@ -89,16 +99,23 @@ function Library() {
     <div className="flex flex-wrap items-center justify-between gap-4"><h1 className="text-4xl font-semibold tracking-tight">My Decks</h1><button disabled={busy} type="button" onClick={() => { setOpen(!open); setCreateError(""); }} aria-expanded={open} aria-controls="create-deck" className={open ? btnSecondary : btnPrimary}>{open ? "Cancel" : "+ Create a deck"}</button></div>
     {open && <Card className="mt-6 p-5 sm:p-7">
       <form id="create-deck" onSubmit={create} className="space-y-5">
-        <div className="flex flex-wrap gap-2" role="group" aria-label="How to create cards">{([{ value: "manual", label: "Write cards" }, { value: "generate", label: "Generate from notes" }, { value: "notes", label: "Save notes only" }] as { value: Mode; label: string }[]).map((option) => <button key={option.value} type="button" disabled={busy} aria-pressed={mode === option.value} onClick={() => { setMode(option.value); setCreateError(""); }} className={mode === option.value ? btnPrimary : btnSecondary}>{option.label}</button>)}</div>
-        {mode === "manual" ? <p className="text-base text-gray-600">Name your deck, then add questions and answers in the editor.</p> : mode === "notes" ? <p className="text-base text-gray-600">Keep the original file in your library. This does not create flashcards.</p> : generationError ? <div role="alert" className="rounded-xl bg-amber-50 p-4 text-amber-900">Could not check whether generation is available. <button type="button" onClick={() => void loadGeneration()} className="font-semibold underline">Check again</button>. You can still write cards yourself.</div> : !generation ? <p role="status" className="text-gray-600">Checking generation availability…</p> : !generation.configured ? <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">AI generation isn’t configured on this server yet. Choose <button type="button" onClick={() => setMode("manual")} className="font-semibold underline">Write cards</button> to make a deck now, or save your notes for later.</div> : <p className="text-base text-gray-600">Upload notes to generate a deck. You’ll review and edit the cards before studying.</p>}
+        <div className="flex flex-wrap gap-2" role="group" aria-label="How to create cards">{([{ value: "manual", label: "Write cards" }, { value: "generate", label: "Generate from notes" }, { value: "csv", label: "Import CSV" }, { value: "notes", label: "Save notes only" }] as { value: Mode; label: string }[]).map((option) => <button key={option.value} type="button" disabled={busy} aria-pressed={mode === option.value} onClick={() => { setMode(option.value); setCreateError(""); setCsvPreview(null); }} className={mode === option.value ? btnPrimary : btnSecondary}>{option.label}</button>)}</div>
+        {mode === "manual" ? <p className="text-base text-gray-600">Name your deck, then add questions and answers in the editor.</p> : mode === "notes" ? <p className="text-base text-gray-600">Keep the original file in your library. This does not create flashcards.</p> : mode === "csv" ? <p className="text-base text-gray-600">Import question and answer columns, with an optional tags column. You’ll preview every valid row count before saving.</p> : generationError ? <div role="alert" className="rounded-xl bg-amber-50 p-4 text-amber-900">Could not check whether generation is available. <button type="button" onClick={() => void loadGeneration()} className="font-semibold underline">Check again</button>. You can still write cards yourself.</div> : !generation ? <p role="status" className="text-gray-600">Checking generation availability…</p> : !generation.configured ? <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">AI generation isn’t configured on this server yet. Choose <button type="button" onClick={() => setMode("manual")} className="font-semibold underline">Write cards</button> to make a deck now, or save your notes for later.</div> : <p className="text-base text-gray-600">Upload notes to generate a deck. You’ll review and edit the cards before studying.</p>}
         <div><label htmlFor="note-title" className="text-sm font-semibold">{mode === "notes" ? "Notes title" : "Deck title"}</label><input ref={titleRef} id="note-title" name="title" required maxLength={200} disabled={busy} placeholder="e.g. Biology — Chapter 4" className={field} /></div>
-        {mode !== "manual" && (mode === "notes" || generation?.configured) && <>
-          <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-5"><label htmlFor="note-file" className="block text-sm font-semibold">Choose your notes</label><p id="file-help" className="mt-2 text-sm text-gray-600">{mode === "notes" ? "PDF, DOCX, or TXT · Up to 5 MB" : `PDF/DOCX up to 20 MB · TXT/MD up to 1 MB${generation?.images_available ? " · JPG/PNG/WEBP up to 10 MB" : " · Photos aren’t enabled here"}`}</p><input id="note-file" name="file" type="file" accept={mode === "notes" ? ".pdf,.docx,.txt" : generation?.images_available ? ".pdf,.docx,.txt,.md,.jpg,.jpeg,.png,.webp" : ".pdf,.docx,.txt,.md"} required disabled={busy} aria-describedby="file-help" className="mt-3 block w-full text-sm" /></div>
+        {mode !== "manual" && (mode === "notes" || mode === "csv" || generation?.configured) && <>
+          <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-5"><label htmlFor="note-file" className="block text-sm font-semibold">{mode === "csv" ? "Choose a CSV file" : "Choose your notes"}</label><p id="file-help" className="mt-2 text-sm text-gray-600">{mode === "csv" ? "UTF-8 CSV · question and answer required · tags optional · Up to 2 MB / 1,000 rows" : mode === "notes" ? "PDF, DOCX, or TXT · Up to 5 MB" : `PDF/DOCX up to 20 MB · TXT/MD up to 1 MB${generation?.images_available ? " · JPG/PNG/WEBP up to 10 MB" : " · Photos aren’t enabled here"}`}</p><input id="note-file" name="file" type="file" accept={mode === "csv" ? ".csv,text/csv" : mode === "notes" ? ".pdf,.docx,.txt" : generation?.images_available ? ".pdf,.docx,.txt,.md,.jpg,.jpeg,.png,.webp" : ".pdf,.docx,.txt,.md"} required disabled={busy} aria-describedby="file-help" onChange={() => { if (mode === "csv") setCsvPreview(null); }} className="mt-3 block w-full text-sm" /></div>
           {mode === "generate" && <div><label htmlFor="generation-focus" className="text-sm font-semibold">Topic to focus on (optional)</label><input id="generation-focus" name="focus" maxLength={300} disabled={busy} placeholder="e.g. DNA replication" className={field} /></div>}
           {mode === "generate" && <fieldset disabled={busy}><legend className="text-sm font-semibold">Auto-tag cards (optional)</legend><p id="tag-help" className="mt-1 text-sm text-gray-600">Tags let you group cards and study one group at a time. You’ll see them on each card in Study, and you can edit them there.</p><div className="mt-2 space-y-2" aria-describedby="tag-help">{[{ value: "", label: "No tags" }, { value: "general", label: "General tags", hint: "1–2 broad topics per card, like “cell biology”" }, { value: "specific", label: "Specific tags", hint: "2–4 exact concepts per card, like “krebs cycle”" }].map((option) => <label key={option.value} className="flex items-start gap-2 text-base"><input type="radio" name="tag_mode" value={option.value} defaultChecked={option.value === ""} className="mt-1.5" /><span>{option.label}{option.hint && <span className="block text-sm text-gray-600">{option.hint}</span>}</span></label>)}</div></fieldset>}
         </>}
+        {mode === "csv" && csvPreview && <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-5">
+          <h3 className="text-lg font-semibold">Ready to import</h3>
+          <p className="mt-2 text-sm text-gray-700"><strong>{csvPreview.valid_count}</strong> valid cards{csvPreview.skipped_count ? <> · <strong>{csvPreview.skipped_count}</strong> skipped rows</> : null}</p>
+          <div className="mt-4 max-h-64 space-y-3 overflow-y-auto">{csvPreview.cards.map((card) => <div key={card.row} className="rounded-lg bg-white p-3 text-sm"><p className="font-semibold">Row {card.row}: {card.question}</p><p className="mt-1 text-gray-700">{card.answer}</p>{card.tags.length > 0 && <p className="mt-1 text-gray-500">Tags: {card.tags.join(", ")}</p>}</div>)}</div>
+          {csvPreview.valid_count > csvPreview.cards.length && <p className="mt-3 text-sm text-gray-600">Showing the first {csvPreview.cards.length} valid cards.</p>}
+          {csvPreview.issues.length > 0 && <div className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-950"><p className="font-semibold">Rows that will be skipped</p><ul className="mt-2 list-disc space-y-1 pl-5">{csvPreview.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul>{csvPreview.issues_truncated && <p className="mt-2">Additional issues are not shown.</p>}</div>}
+        </div>}
         {createError && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{createError}</p>}
-        <button disabled={busy || (mode === "generate" && !generation?.configured)} className={btnPrimary}>{busy ? mode === "generate" ? "Generating your cards…" : "Saving…" : mode === "manual" ? "Create deck & add cards →" : mode === "notes" ? "Save notes" : "Generate & review cards →"}</button>
+        <button disabled={busy || (mode === "generate" && !generation?.configured)} className={btnPrimary}>{mode === "csv" ? csvActionLabel(csvPreview, busy) : busy ? mode === "generate" ? "Generating your cards…" : "Saving…" : mode === "manual" ? "Create deck & add cards →" : mode === "notes" ? "Save notes" : "Generate & review cards →"}</button>
         {busy && <p role="status" className="text-sm text-gray-600">{mode === "generate" ? "This may take a little while. Keep this page open; your deck will open when it’s ready." : "Keep this page open while your changes are saved."}</p>}
       </form>
     </Card>}

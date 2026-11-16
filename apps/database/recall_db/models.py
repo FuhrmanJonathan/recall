@@ -105,14 +105,10 @@ class Flashcard(TimestampMixin, Base):
     cloze_blank: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     deck: Mapped[Deck] = relationship(back_populates="flashcards")
-<<<<<<< HEAD
-    # tag system
-    deck: Mapped[Deck] = relationship(back_populates="flashcards")
     tags: Mapped[list["CardTag"]] = relationship(  
         cascade="all, delete-orphan", passive_deletes=True, lazy="selectin")
     images: Mapped[list["CardImage"]] = relationship(
         cascade="all, delete-orphan", passive_deletes=True, lazy="selectin")
-=======
     quiz_question: Mapped["QuizQuestion | None"] = relationship(
         back_populates="card", cascade="all, delete-orphan", lazy="selectin")
 
@@ -148,7 +144,6 @@ class QuizRun(TimestampMixin, Base):
     attempts: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
 
->>>>>>> 06797267a1c414c3623ce1a38e772c64cb088750
 
 class StudyActivity(Base):
     __tablename__ = "study_activity"
@@ -217,6 +212,12 @@ class Review(TimestampMixin, Base):
         ForeignKey("users.id", ondelete="CASCADE"), index=True)
     rating: Mapped[str] = mapped_column(String(10))  # Again/Hard/Good/Easy
 
+
+class CardLabel(Base):
+    __tablename__ = "card_labels"
+    flashcard_id: Mapped[int] = mapped_column(ForeignKey("flashcards.id", ondelete="CASCADE"), primary_key=True)
+    name: Mapped[str] = mapped_column(String(40), primary_key=True, index=True)
+    color: Mapped[str] = mapped_column(String(20), default="blue", server_default="blue")
 
 # class CardLabel(Base):
 #     """Normalized labels attached to cards; ownership follows the card's deck."""

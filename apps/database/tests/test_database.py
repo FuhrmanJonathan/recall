@@ -127,5 +127,5 @@ def test_existing_decks_gain_revision_without_losing_data(tmp_path):
     create_tables(engine)
     create_tables(engine)  # Repeated startup must be safe.
     with engine.connect() as connection:
-        assert connection.execute(text("SELECT title, version FROM decks WHERE id=1")).one() == ('Existing deck', 1)
+        assert connection.execute(text("SELECT title, version, is_public, description, subject FROM decks WHERE id=1")).one() == ('Existing deck', 1, 0, '', '')
     engine.dispose()
