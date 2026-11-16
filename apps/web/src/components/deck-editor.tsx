@@ -6,10 +6,27 @@ import { useEffect, useRef, useState } from "react";
 import { useLeaveGuard } from "@/components/use-leave-guard";
 import { RequireAuth, useAuth } from "@/components/auth";
 import { Card, btnPrimary, btnSecondary } from "@/components/ui";
+import { ImageAttach, validateImage, uploadCardImage, deleteCardImage, pastedImage, type CardImage } from "@/components/card-image";
+import { ChipInput } from "@/components/chip-input";
+import { LabelChip, ColorPicker, PALETTE, defaultColor, type LabelInfo } from "@/components/card-labels";
 
-type Flashcard = { id?: number; question: string; answer: string; needs_review: boolean };
-type Deck = { id: number; title: string; version: number; flashcards: Flashcard[] };
 const field = "w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-base text-ink placeholder:text-gray-500";
+
+type Flashcard = { id?: number; question: string; answer: string; needs_review: boolean; tags: LabelInfo[]; images?: CardImage[] };
+type Deck = { id: number; title: string; version: number; labels: LabelInfo[]; flashcards: Flashcard[] };
+type PaletteTarget = { kind: "labels" | "tags"; name: string } | null;
+
+const blankCard = (): Flashcard => ({ question: "", answer: "", needs_review: false, tags: [], images: [] });
+
+// Accepts plain strings (old drafts, old /api/labels) or {name, color} objects.
+const asInfo = (v: string | LabelInfo): LabelInfo => (typeof v === "string" ? { name: v, color: defaultColor(v) } : v);
+
+// Fills in anything missing so the rest of the editor can rely on the new shape.
+const normalizeDeck = (d: Deck): Deck => ({
+  ...d,
+  labels: (d.labels ?? []).map(asInfo),
+  flashcards: (d.flashcards ?? []).map((c) => ({ ...c, tags: (c.tags ?? []).map(asInfo), images: c.images ?? [] })),
+});
 
 function Editor({ deckId }: { deckId: string }) {
   const { user } = useAuth();
@@ -30,6 +47,12 @@ function Editor({ deckId }: { deckId: string }) {
   const [draftStored, setDraftStored] = useState(false);
   const [revision, setRevision] = useState(0);
   const [removed, setRemoved] = useState<{ card: Flashcard; index: number } | null>(null);
+  const [imageBusy, setImageBusy] = useState(false);
+  const [imageError, setImageError] = useState("");
+  const [allLabels, setAllLabels] = useState<LabelInfo[]>([]);
+  const [paletteFor, setPaletteFor] = useState<PaletteTarget>(null);
+  const [colorError, setColorError] = useState("");
+  const [tagFilter, setTagFilter] = useState("");
   const lock = useRef(false);
   const questionRef = useRef<HTMLTextAreaElement>(null);
   const dirty = !!deck && JSON.stringify(deck) !== saved;
@@ -41,7 +64,7 @@ function Editor({ deckId }: { deckId: string }) {
     fetch(`/api/decks/${encodeURIComponent(deckId)}`, { signal: controller.signal, cache: "no-store" })
       .then(async (res) => {
         if (!res.ok) throw new Error(res.status === 404 ? "This deck could not be found." : "Could not load this deck. Please try again.");
-        const next: Deck = await res.json();
+        const next = normalizeDeck(await res.json());
         if (!controller.signal.aborted) {
           setSaved(JSON.stringify(next));
           const params = new URLSearchParams(window.location.search);
@@ -51,7 +74,11 @@ function Editor({ deckId }: { deckId: string }) {
           let restored: { deck: Deck; active: number } | null = null;
           try { restored = JSON.parse(sessionStorage.getItem(draftKey) ?? "null"); } catch { /* Storage may be unavailable. */ }
           if (restored?.deck?.id === next.id && Array.isArray(restored.deck.flashcards) && typeof restored.deck.version === "number") {
-            working = restored.deck;
+            // Images change on the server immediately, so always take them from the fresh load.
+            const fresh = new Map<number | undefined, CardImage[]>(
+              next.flashcards.map((c) => [c.id, c.images ?? []] as [number | undefined, CardImage[]]));
+            const draft = normalizeDeck(restored.deck);
+            working = { ...draft, flashcards: draft.flashcards.map((c) => ({ ...c, images: c.id ? fresh.get(c.id) ?? [] : [] })) };
             fallbackActive = Math.max(0, Math.min(restored.active || 0, working.flashcards.length - 1));
             setMessage("Unsaved draft restored.");
             if (working.version !== next.version) {
@@ -60,7 +87,7 @@ function Editor({ deckId }: { deckId: string }) {
           }
           // Explicit card/add links take priority over the last card in a restored draft.
           if (params.get("add") === "1" && working.flashcards.length < 1000) {
-            setDeck({ ...working, flashcards: [...working.flashcards, { question: "", answer: "", needs_review: false }] });
+            setDeck({ ...working, flashcards: [...working.flashcards, blankCard()] });
             setActive(working.flashcards.length);
             const nextUrl = new URL(window.location.href); nextUrl.searchParams.delete("add");
             window.history.replaceState(window.history.state, "", nextUrl.pathname + nextUrl.search);
@@ -86,6 +113,14 @@ function Editor({ deckId }: { deckId: string }) {
     } catch { setDraftStored(false); }
   }, [deck, active, dirty, loading, saved, draftKey]);
 
+  // The user's known label names and colors, for autocomplete. Accepts strings or objects.
+  useEffect(() => {
+    fetch("/api/labels", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list: (string | LabelInfo)[]) => setAllLabels(Array.isArray(list) ? list.map(asInfo) : []))
+      .catch(() => {});
+  }, [revision]);
+
   function reloadLatest() {
     if (dirty && !window.confirm("Reload the latest saved deck and discard your unsaved draft?")) return;
     try { sessionStorage.removeItem(draftKey); } catch { /* Storage may be unavailable. */ }
@@ -97,11 +132,11 @@ function Editor({ deckId }: { deckId: string }) {
     setDeck({ ...deck, flashcards: deck.flashcards.map((card, i) => i === active ? { ...card, ...changes } : card) });
     setMessage("");
   }
-  function selectCard(index: number) { setActive(index); setFlipped(false); }
+  function selectCard(index: number) { setActive(index); setFlipped(false); setImageError(""); }
   function addCard() {
     if (!deck || deck.flashcards.length >= 1000) return;
-    setDeck({ ...deck, flashcards: [...deck.flashcards, { question: "", answer: "", needs_review: false }] });
-    selectCard(deck.flashcards.length); setQuery(""); setFlaggedOnly(false); setPreview(false); setMessage("");
+    setDeck({ ...deck, flashcards: [...deck.flashcards, blankCard()] });
+    selectCard(deck.flashcards.length); setQuery(""); setFlaggedOnly(false); setTagFilter(""); setPreview(false); setMessage("");
     requestAnimationFrame(() => questionRef.current?.focus());
   }
   function removeCard() {
@@ -120,21 +155,51 @@ function Editor({ deckId }: { deckId: string }) {
       setDeck(JSON.parse(saved)); selectCard(0); setRemoved(null); setConflict(false); setError(""); setMessage("");
     }
   }
+
+  // Images save immediately, so patch BOTH `deck` and `saved`. Otherwise "dirty" would flip.
+  function patchImages(cardId: number, update: (imgs: CardImage[]) => CardImage[]) {
+    const apply = (d: Deck): Deck => ({ ...d, flashcards: d.flashcards.map((c) => c.id === cardId ? { ...c, images: update(c.images ?? []) } : c) });
+    setDeck((d) => (d ? apply(d) : d));
+    setSaved((s) => JSON.stringify(apply(JSON.parse(s))));
+  }
+  async function attach(side: CardImage["side"], file: File) {
+    const target = deck?.flashcards[active];
+    if (!target?.id) { setImageError("Save the deck first, then add images to this new card."); return; }
+    const problem = validateImage(file);
+    if (problem) { setImageError(problem); return; }
+    setImageBusy(true); setImageError("");
+    try { const img = await uploadCardImage(target.id, side, file); patchImages(target.id, (imgs) => [...imgs, img]); }
+    catch (e) { setImageError(e instanceof Error ? e.message : "Could not upload image."); }
+    finally { setImageBusy(false); }
+  }
+  async function detach(id: number) {
+    const cardId = deck?.flashcards[active]?.id;
+    if (!cardId) return;
+    setImageBusy(true); setImageError("");
+    try { await deleteCardImage(id); patchImages(cardId, (imgs) => imgs.filter((i) => i.id !== id)); }
+    catch (e) { setImageError(e instanceof Error ? e.message : "Could not remove image."); }
+    finally { setImageBusy(false); }
+  }
+
   async function save() {
     if (!deck || lock.current || conflict) return;
     if (!deck.title.trim()) { setError("Give your deck a title before saving."); return; }
     const invalid = deck.flashcards.findIndex((card) => !card.question.trim() || !card.answer.trim());
     if (invalid !== -1) {
-      selectCard(invalid); setQuery(""); setFlaggedOnly(false); setPreview(false);
+      selectCard(invalid); setQuery(""); setFlaggedOnly(false); setTagFilter(""); setPreview(false);
       setError(`Card ${invalid + 1} needs both a question and an answer.`); return;
     }
     lock.current = true; setSaving(true); setError(""); setMessage("");
     try {
-      const res = await fetch(`/api/decks/${deck.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: deck.title, version: deck.version, flashcards: deck.flashcards }) });
+      const res = await fetch(`/api/decks/${deck.id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: deck.title, version: deck.version, labels: deck.labels, flashcards: deck.flashcards }),
+      });
       const body = await res.json().catch(() => ({}));
       if (res.status === 409) setConflict(true);
       if (!res.ok) throw new Error(typeof body.detail === "string" ? body.detail : "Could not save your changes. Your edits are still here; please try again.");
-      setDeck(body); setSaved(JSON.stringify(body)); setRemoved(null); setConflict(false); setMessage("All changes saved.");
+      const next = normalizeDeck(body);
+      setDeck(next); setSaved(JSON.stringify(next)); setRemoved(null); setConflict(false); setMessage("All changes saved.");
       try { sessionStorage.removeItem(draftKey); } catch { /* Storage may be unavailable. */ }
     } catch (e) { setError(e instanceof Error ? e.message : "Could not save your changes."); }
     finally { lock.current = false; setSaving(false); }
@@ -144,8 +209,50 @@ function Editor({ deckId }: { deckId: string }) {
   if (!deck) return <Card className="mx-auto max-w-lg p-8"><h1 className="text-xl font-semibold">Let’s try that again</h1><p role="alert" className="mt-3 text-red-700">{error}</p><div className="mt-6 flex gap-3"><button onClick={() => setRevision((v) => v + 1)} className={btnPrimary}>Try again</button><Link href="/decks" className={btnSecondary}>My decks</Link></div></Card>;
 
   const card = deck.flashcards[active];
+
+  // Tags only exist inside this deck, so suggestions and colors come from this deck's own cards.
+  const tagColors = new Map(deck.flashcards.flatMap((c) => c.tags).map((t) => [t.name, t.color]));
+  const deckTags = [...tagColors.keys()].sort();
+  const activeTag = deckTags.includes(tagFilter) ? tagFilter : "";
+  const labelColor = (n: string) => deck.labels.find((l) => l.name === n)?.color || allLabels.find((l) => l.name === n)?.color || defaultColor(n);
+  const tagColor = (n: string) => tagColors.get(n) || defaultColor(n);
+
+  const recolor = (list: LabelInfo[], name: string, color: string) => list.map((x) => (x.name === name ? { ...x, color } : x));
+  function applyColor(d: Deck, kind: "labels" | "tags", name: string, color: string): Deck {
+    return kind === "labels"
+      ? { ...d, labels: recolor(d.labels, name, color) }
+      : { ...d, flashcards: d.flashcards.map((c) => ({ ...c, tags: recolor(c.tags, name, color) })) };
+  }
+  // Color saves immediately, so patch BOTH deck and saved to keep "dirty" honest.
+  async function changeColor(kind: "labels" | "tags", name: string, color: string) {
+    const prev = kind === "labels" ? labelColor(name) : tagColor(name);
+    const apply = (c: string) => {
+      setDeck((d) => (d ? applyColor(d, kind, name, c) : d));
+      setSaved((s) => JSON.stringify(applyColor(JSON.parse(s), kind, name, c)));
+      if (kind === "labels") setAllLabels((l) => l.some((x) => x.name === name) ? recolor(l, name, c) : [...l, { name, color: c }]);
+    };
+    apply(color); setPaletteFor(null); setColorError("");
+    try {
+      const url = kind === "labels" ? "/api/labels/color" : `/api/decks/${deck!.id}/tags/color`;
+      const res = await fetch(url, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, color }) });
+      if (!res.ok) throw new Error();
+    } catch { apply(prev); setColorError("Could not change that color. Please try again."); }
+  }
+  const chip = (kind: "labels" | "tags", name: string, color: string, remove: () => void) =>
+    <LabelChip name={kind === "tags" ? `#${name}` : name} color={color}>
+      <button type="button" aria-label={`Change color of ${name}`} onClick={() => setPaletteFor(paletteFor?.name === name && paletteFor.kind === kind ? null : { kind, name })}
+        className="h-3 w-3 rounded-full border border-black/20" style={{ backgroundColor: PALETTE[color]?.fg }} />
+      <button type="button" aria-label={`Remove ${name}`} onClick={remove} className="leading-none">×</button>
+    </LabelChip>;
+
   const flagged = deck.flashcards.filter((c) => c.needs_review).length;
-  const visible = deck.flashcards.map((c, index) => ({ ...c, index })).filter((c) => (!flaggedOnly || c.needs_review) && `${c.question} ${c.answer}`.toLowerCase().includes(query.toLowerCase()));
+  const visible = deck.flashcards.map((c, index) => ({ ...c, index })).filter((c) =>
+    (!flaggedOnly || c.needs_review) &&
+    (!activeTag || c.tags.some((t) => t.name === activeTag)) &&
+    `${c.question} ${c.answer} ${c.tags.map((t) => t.name).join(" ")}`.toLowerCase().includes(query.toLowerCase()));
+  const shownSide = flipped ? "answer" : "question";
+  const shownImages = (card?.images ?? []).filter((i) => i.side === shownSide);
+
   return <section>
     <div className="mb-8 flex flex-wrap items-center justify-between gap-5">
       <div>
@@ -160,15 +267,28 @@ function Editor({ deckId }: { deckId: string }) {
         <div><label htmlFor="deck-title" className="text-sm font-semibold  text-gray-500">Deck title</label><input id="deck-title" value={deck.title} maxLength={200} disabled={saving} onChange={(e) => { setDeck({ ...deck, title: e.target.value }); setMessage(""); }} className="mt-2 block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-lg font-semibold" /></div>
         <div className="flex flex-wrap gap-2 text-sm"><span className="rounded-full bg-blue-50 px-3 py-2 font-medium text-accent">{deck.flashcards.length} cards</span>{flagged > 0 && <span className="rounded-full bg-amber-50 px-3 py-2 text-amber-900">{flagged} to check</span>}</div>
       </div>
+      <div className="mt-5 border-t border-gray-100 pt-5">
+        <ChipInput id="deck-labels" label="Deck labels" value={deck.labels.map((l) => l.name)} disabled={saving}
+          onChange={(names) => { setDeck({ ...deck, labels: names.map((n) => deck.labels.find((l) => l.name === n) ?? { name: n, color: labelColor(n) }) }); setMessage(""); }}
+          suggestions={allLabels.map((l) => l.name)} placeholder="biology, science…"
+          renderChip={(n, remove) => chip("labels", n, labelColor(n), remove)} />
+        {paletteFor?.kind === "labels" && <div className="mt-3"><ColorPicker title={`${paletteFor.name} (every deck with this label)`}
+          current={labelColor(paletteFor.name)} onPick={(k) => void changeColor("labels", paletteFor.name, k)} /></div>}
+      </div>
     </Card>
     {error && <div role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800"><p>{error}</p>{conflict && <button disabled={saving} onClick={reloadLatest} className={`mt-3 ${btnSecondary}`}>Reload latest deck</button>}</div>}
+    {colorError && <div role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">{colorError}</div>}
     {removed && <div role="status" className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm"><span>Card removed. Save to apply this change; its review history will also be deleted.</span><button disabled={saving} onClick={undoRemove} className="font-semibold text-accent">Undo</button></div>}
     <div className="grid items-start gap-6 lg:grid-cols-[300px_minmax(0,1fr)]">
       <aside className="hidden lg:block min-w-0 rounded-2xl border border-gray-200 bg-white p-5 lg:sticky lg:top-6">
         <div className="flex items-center justify-between"><h2 className="font-semibold">Your cards</h2><button disabled={saving || deck.flashcards.length >= 1000} onClick={addCard} className="rounded-lg bg-blue-50 px-3 py-2 text-sm font-semibold text-accent">+ Add</button></div>
         <label htmlFor="card-search" className="sr-only">Search cards</label><input id="card-search" type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find a card…" className={`${field} mt-4 bg-gray-50`} />
         <label className="my-4 flex items-center gap-2 text-sm text-gray-600"><input type="checkbox" checked={flaggedOnly} onChange={(e) => setFlaggedOnly(e.target.checked)} className="accent-blue-600" />Only cards to check ({flagged})</label>
-        <div className="max-h-40 space-y-1 overflow-y-auto lg:max-h-[560px]">{visible.map((c) => <button key={c.id ?? `new-${c.index}`} disabled={saving} aria-current={active === c.index ? "true" : undefined} onClick={() => selectCard(c.index)} className={`flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left text-base leading-6 ${active === c.index ? "bg-blue-50 text-accent ring-1 ring-inset ring-blue-100" : "text-gray-600 hover:bg-gray-50"}`}><span className="pt-0.5 text-sm tabular-nums opacity-60">{String(c.index + 1).padStart(2, "0")}</span><span className="min-w-0 flex-1"><span className="line-clamp-3 break-words font-medium">{c.question || "Untitled card"}</span>{c.needs_review && <span className="mt-1 block text-sm text-amber-800">Needs a check</span>}</span></button>)}{!visible.length && <p className="py-6 text-center text-sm text-gray-500">{deck.flashcards.length ? "No matching cards." : "Your first card starts here."}</p>}</div>
+        {deckTags.length > 0 && <label className="mb-4 block text-sm text-gray-600">Tag
+          <select value={activeTag} onChange={(e) => setTagFilter(e.target.value)} className="mt-1 block w-full rounded-lg border border-gray-300 bg-white px-2 py-2 text-sm">
+            <option value="">All tags</option>{deckTags.map((t) => <option key={t} value={t}>#{t}</option>)}
+          </select></label>}
+        <div className="max-h-40 space-y-1 overflow-y-auto lg:max-h-[560px]">{visible.map((c) => <button key={c.id ?? `new-${c.index}`} disabled={saving} aria-current={active === c.index ? "true" : undefined} onClick={() => selectCard(c.index)} className={`flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left text-base leading-6 ${active === c.index ? "bg-blue-50 text-accent ring-1 ring-inset ring-blue-100" : "text-gray-600 hover:bg-gray-50"}`}><span className="pt-0.5 text-sm tabular-nums opacity-60">{String(c.index + 1).padStart(2, "0")}</span><span className="min-w-0 flex-1"><span className="line-clamp-3 break-words font-medium">{c.question || "Untitled card"}</span>{c.tags.length > 0 && <span className="mt-1 block truncate text-sm opacity-70">{c.tags.map((t) => `#${t.name}`).join(" ")}</span>}{c.needs_review && <span className="mt-1 block text-sm text-amber-800">Needs a check</span>}</span></button>)}{!visible.length && <p className="py-6 text-center text-sm text-gray-500">{deck.flashcards.length ? "No matching cards." : "Your first card starts here."}</p>}</div>
       </aside>
       <div className="min-w-0">
         <div className="mb-5 flex items-end gap-3 lg:hidden">
@@ -179,7 +299,28 @@ function Editor({ deckId }: { deckId: string }) {
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-5 py-4 sm:px-7"><h2 className="text-sm font-semibold">Card {active + 1}<span className="ml-2 font-normal text-gray-500">/ {deck.flashcards.length}</span></h2><div className="flex rounded-lg bg-gray-100 p-1 text-sm"><button aria-pressed={!preview} onClick={() => setPreview(false)} className={`rounded-md px-3 py-2 ${!preview ? "bg-white font-semibold shadow-sm" : "text-gray-500"}`}>Edit content</button><button aria-pressed={preview} onClick={() => { setPreview(true); setFlipped(false); }} className={`rounded-md px-3 py-2 ${preview ? "bg-white font-semibold shadow-sm" : "text-gray-500"}`}>Preview</button></div></div>
           <div className="p-5 sm:p-7">
             {card.needs_review && <div className="mb-6 rounded-xl bg-amber-50 p-4 text-sm text-amber-900"><p className="font-medium">Check this card against your notes</p><p className="mt-1 text-sm leading-5">The source may have been difficult to read. Check the question and answer against your notes, then mark it checked below.</p></div>}
-            {preview ? <button onClick={() => setFlipped(!flipped)} aria-label={flipped ? "Show question" : "Show answer"} className="flex min-h-80 w-full flex-col items-center justify-between rounded-2xl border border-blue-100 bg-blue-50/40 p-7 text-center"><span className="flex w-full items-center justify-between gap-3"><span className="text-sm font-semibold text-accent">{flipped ? "Answer" : "Question"}</span><Yogo expression={flipped ? "encouraging" : "thinking"} size={48} /></span><span className="my-8 whitespace-pre-wrap break-words text-2xl leading-relaxed">{(flipped ? card.answer : card.question) || "Your text will appear here"}</span><span className="text-sm text-gray-500">Click to flip the card ↻</span></button> : <div className="space-y-6"><div><div className="mb-2 flex justify-between gap-2"><label htmlFor="question" className="text-sm font-semibold">Question</label></div><textarea ref={questionRef} id="question" value={card.question} maxLength={2000} disabled={saving} onChange={(e) => updateCard({ question: e.target.value })} placeholder="What do you want to remember?" className={`${field} min-h-36 resize-y text-lg leading-8`} /><p className="mt-1 text-right text-sm text-gray-500">{card.question.length} / 2,000</p></div><div><div className="mb-2 flex justify-between gap-2"><label htmlFor="answer" className="text-sm font-semibold">Answer</label></div><textarea id="answer" value={card.answer} maxLength={5000} disabled={saving} onChange={(e) => updateCard({ answer: e.target.value })} placeholder="Keep it clear and focused on one idea." className={`${field} min-h-44 resize-y text-lg leading-8`} /><p className="mt-1 text-right text-sm text-gray-500">{card.answer.length} / 5,000</p></div></div>}
+            {preview ? <button onClick={() => setFlipped(!flipped)} aria-label={flipped ? "Show question" : "Show answer"} className="flex min-h-80 w-full flex-col items-center justify-between rounded-2xl border border-blue-100 bg-blue-50/40 p-7 text-center"><span className="flex w-full items-center justify-between gap-3"><span className="text-sm font-semibold text-accent">{flipped ? "Answer" : "Question"}</span><Yogo expression={flipped ? "encouraging" : "thinking"} size={48} /></span><span className="my-8 whitespace-pre-wrap break-words text-2xl leading-relaxed">{(flipped ? card.answer : card.question) || "Your text will appear here"}</span>{shownImages.length > 0 && <span className="flex flex-wrap justify-center gap-3 pb-6">{shownImages.map((i) => /* eslint-disable-next-line @next/next/no-img-element */ <img key={i.id} src={`/api/images/${i.id}`} alt="" className="max-h-48 max-w-full rounded-lg border border-gray-200 object-contain" />)}</span>}<span className="text-sm text-gray-500">Click to flip the card ↻</span></button> : <div className="space-y-6"><div><div className="mb-2 flex justify-between gap-2"><label htmlFor="question" className="text-sm font-semibold">Question</label></div><textarea ref={questionRef} id="question" value={card.question} maxLength={2000} disabled={saving} onChange={(e) => updateCard({ question: e.target.value })} onPaste={(e) => { const f = pastedImage(e); if (f) { e.preventDefault(); void attach("question", f); } }} placeholder="What do you want to remember?" className={`${field} min-h-36 resize-y text-lg leading-8`} /><p className="mt-1 text-right text-sm text-gray-500">{card.question.length} / 2,000</p></div><div><div className="mb-2 flex justify-between gap-2"><label htmlFor="answer" className="text-sm font-semibold">Answer</label></div><textarea id="answer" value={card.answer} maxLength={5000} disabled={saving} onChange={(e) => updateCard({ answer: e.target.value })} onPaste={(e) => { const f = pastedImage(e); if (f) { e.preventDefault(); void attach("answer", f); } }} placeholder="Keep it clear and focused on one idea." className={`${field} min-h-44 resize-y text-lg leading-8`} /><p className="mt-1 text-right text-sm text-gray-500">{card.answer.length} / 5,000</p></div></div>}
+            <div className="mt-6 border-t border-gray-100 pt-5">
+              <ChipInput id="card-tags" label={`Tags in “${deck.title || "this deck"}”`} value={card.tags.map((t) => t.name)} disabled={saving}
+                onChange={(names) => updateCard({ tags: names.map((n) => card.tags.find((t) => t.name === n) ?? { name: n, color: tagColor(n) }) })}
+                suggestions={deckTags} placeholder="ch.3, midterm…"
+                renderChip={(n, remove) => chip("tags", n, tagColor(n), remove)} />
+              {paletteFor?.kind === "tags" && <div className="mt-3"><ColorPicker title={`#${paletteFor.name} (this deck only)`}
+                current={tagColor(paletteFor.name)} onPick={(k) => void changeColor("tags", paletteFor.name, k)} /></div>}
+            </div>
+            <details key={active} className="mt-6 border-t border-gray-100 pt-5">
+              <summary className="cursor-pointer text-sm font-semibold">Images{(card.images?.length ?? 0) > 0 && ` (${card.images!.length})`} <span className="font-normal text-gray-500">· optional</span></summary>
+              {card.id === undefined
+                ? <p className="mt-3 text-sm text-gray-500">Save the deck first, then you can add images to this card.</p>
+                : <div className="mt-3 space-y-4">
+                    {(["question", "answer"] as const).map((side) => <div key={side}>
+                      <p className="text-sm font-semibold capitalize">{side} image</p>
+                      <ImageAttach side={side} images={(card.images ?? []).filter((i) => i.side === side)}
+                        disabled={saving || imageBusy} onAdd={(f) => void attach(side, f)} onRemove={(id) => void detach(id)} />
+                    </div>)}
+                    {imageError && <p role="alert" className="text-sm text-red-700">{imageError}</p>}
+                  </div>}
+            </details>
             <div className="mt-6 flex flex-wrap items-center justify-between gap-4 border-t border-gray-100 pt-5"><label className="flex items-center gap-2 text-sm text-gray-600"><input type="checkbox" checked={card.needs_review} disabled={saving} onChange={(e) => updateCard({ needs_review: e.target.checked })} className="h-4 w-4 accent-blue-600" />Needs checking</label><button disabled={saving} onClick={removeCard} className="rounded-lg px-2 py-2 text-sm font-medium text-red-700 hover:bg-red-50">Remove card</button></div>
           </div>
         </Card> : <Card className="p-12 text-center"><p className="text-3xl text-accent" aria-hidden="true">▤</p><h2 className="mt-4 text-xl font-semibold">A fresh start</h2><p className="mt-2 text-sm text-gray-500">Add a question and answer to start building this deck.</p><button disabled={saving} onClick={addCard} className={`mt-6 ${btnPrimary}`}>+ Add your first card</button></Card>}

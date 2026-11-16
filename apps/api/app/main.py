@@ -18,6 +18,8 @@ from recall_db.database import create_tables
 from app.reminders import router as reminders_router
 from app.sharing import router as sharing_router
 from app.csv_transfer import router as csv_router
+from app.images import router as images_router 
+from app.tagging import router as tagging_router
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -38,6 +40,8 @@ app.include_router(quiz_router)
 app.include_router(goals_router)
 app.include_router(csv_router)
 
+app.include_router(images_router)
+app.include_router(tagging_router)
 
 class TextIn(BaseModel):
     text: str
