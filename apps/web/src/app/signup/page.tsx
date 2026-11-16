@@ -5,6 +5,7 @@ import Link from "next/link";
 import { safeDestination } from "@/components/safe-destination";
 import { useAuth } from "@/components/auth";
 import AuthCard, { inputClass, submitClass } from "@/components/authcard";
+import GoogleSignIn from "@/components/google-sign-in";
 
 function SignUpForm() {
   const router = useRouter();
@@ -49,6 +50,7 @@ function SignUpForm() {
 
   return (
     <AuthCard title="Create your account" subtitle="Start turning your notes into flashcards.">
+      <GoogleSignIn destination={destination} busy={busy} onBusyChange={setBusy} />
       <form onSubmit={onSubmit} className="flex flex-col gap-3">
         <label htmlFor="signup-email" className="text-sm font-semibold">Email</label>
         <input id="signup-email" disabled={busy} name="email" type="email" required autoComplete="email"

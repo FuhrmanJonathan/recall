@@ -5,6 +5,7 @@ import Link from "next/link";
 import { safeDestination } from "@/components/safe-destination";
 import { useAuth } from "@/components/auth";
 import AuthCard, { inputClass, submitClass } from "@/components/authcard";
+import GoogleSignIn from "@/components/google-sign-in";
 
 function LoginForm() {
   const router = useRouter();
@@ -53,6 +54,7 @@ function LoginForm() {
           That email already has an account. Please log in.
         </p>
       )}
+      <GoogleSignIn destination={destination} busy={busy} onBusyChange={setBusy} />
       <form onSubmit={onSubmit} className="flex flex-col gap-3">
         <label htmlFor="login-email" className="text-sm font-semibold">Email</label>
         <input id="login-email" disabled={busy} name="email" type="email" required autoComplete="email"

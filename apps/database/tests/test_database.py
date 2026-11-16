@@ -3,8 +3,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from recall_db.database import Base, create_database_engine
-from recall_db.models import AuthSession, Deck, Flashcard, User
+from recall_db.database import Base, create_database_engine, create_tables
+from recall_db.models import AuthSession, Deck, Flashcard, GoogleIdentity, GoogleLoginChallenge, User
 
 
 @pytest.fixture()
@@ -43,6 +43,31 @@ def test_duplicate_email_is_rejected(session: Session):
 
     with pytest.raises(IntegrityError):
         session.commit()
+
+
+def test_google_tables_are_added_to_existing_database_without_changing_accounts(tmp_path):
+    engine = create_database_engine(f"sqlite:///{tmp_path / 'existing.db'}")
+    Base.metadata.create_all(engine, tables=[User.__table__, Deck.__table__])
+    with Session(engine) as session:
+        user = User(email="existing@example.com", password_hash="keep-this-hash")
+        session.add(user)
+        session.flush()
+        session.add(Deck(user_id=user.id, title="Keep this deck"))
+        session.commit()
+        user_id = user.id
+    create_tables(engine)
+    create_tables(engine)  # Startup remains idempotent.
+    with Session(engine) as session:
+        assert session.get(User, user_id).password_hash == "keep-this-hash"
+        assert session.scalar(select(Deck)).title == "Keep this deck"
+        assert session.scalars(select(GoogleIdentity)).all() == []
+        assert session.scalars(select(GoogleLoginChallenge)).all() == []
+        session.add(GoogleIdentity(subject="google-subject", user_id=user_id))
+        session.commit()
+        session.delete(session.get(User, user_id))
+        session.commit()
+        assert session.scalars(select(GoogleIdentity)).all() == []
+    engine.dispose()
 
 
 def test_flashcard_requires_an_existing_deck(session: Session):

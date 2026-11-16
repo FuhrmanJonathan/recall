@@ -10,6 +10,9 @@ load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 # Enable for HTTPS deployments; local development uses HTTP.
 SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "false").lower() in {"1", "true", "yes"}
 
+# Public web client ID; an empty value disables Google sign-in.
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "").strip()
+
 # --- Limits (MAX_TEXT_CHARS / MAX_UPLOAD_BYTES were previously defined in main.py) ---
 MAX_TEXT_CHARS = 50_000
 MAX_UPLOAD_BYTES = 1_000_000  # .txt / .md uploads

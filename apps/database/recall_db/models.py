@@ -41,6 +41,22 @@ class AuthSession(TimestampMixin, Base):
     user: Mapped[User] = relationship(back_populates="sessions")
 
 
+class GoogleIdentity(Base):
+    __tablename__ = "google_identities"
+
+    subject: Mapped[str] = mapped_column(String(255), primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), unique=True
+    )
+
+
+class GoogleLoginChallenge(Base):
+    __tablename__ = "google_login_challenges"
+
+    nonce_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    expires_at: Mapped[int] = mapped_column(index=True)
+
+
 class PasswordResetToken(Base):
     __tablename__ = "password_reset_tokens"
 
