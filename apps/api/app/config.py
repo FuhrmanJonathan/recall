@@ -30,8 +30,12 @@ OPENAI_REASONING_EFFORT = os.getenv("OPENAI_REASONING_EFFORT", "low")
 GENERATION_CHUNK_CHARS = 8_000
 MAX_CONCURRENT_REQUESTS = 4
 
-# --- OCR ---
-OCR_MODEL_ID = os.getenv("OCR_MODEL_ID", "stepfun-ai/GOT-OCR-2.0-hf")
+# --- Auto-tagging (app/autotag.py) ---
+# Cards are embedded, clustered with HDBSCAN, and only then named by OPENAI_MODEL.
+OPENAI_EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
+AUTOTAG_PCA_DIMS = 15          # embeddings are reduced to this many dimensions before clustering
+AUTOTAG_MIN_SAMPLES = 2        # HDBSCAN min_samples; lower = fewer cards left untagged
+AUTOTAG_NOISE_SIMILARITY = 0.5  # an unclustered card joins a cluster above this cosine similarity
 
 # --- Flashcard generation ---
 # Optional "what should this deck focus on?" text from the student.

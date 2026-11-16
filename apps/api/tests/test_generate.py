@@ -11,9 +11,8 @@ from app.deps import get_session
 from app.documents import SourceKind, detect_source_kind
 from app.flashcards import CardDraft, CardSet
 from app.main import app
-from app.ocr import OCRUnavailableError
 from recall_db.database import Base, create_database_engine, create_tables
-from recall_db.models import CardLabel, Deck, Flashcard, User
+from recall_db.models import CardTag, Deck, DeckLabel, Flashcard, User
 
 CARDS = [
     CardDraft(question="What is mitosis?", answer="Cell division."),
@@ -60,8 +59,8 @@ def test_detect_source_kind():
 def test_text_upload_saves_deck(client, engine, monkeypatch):
     seen = {}
 
-    async def fake_text(text, *, from_ocr=False, focus=None, tag_mode=None):
-        seen["text"], seen["from_ocr"] = text, from_ocr
+    async def fake_text(text, *, focus=None):
+        seen["text"] = text
         return CARDS
 
     monkeypatch.setattr(generate, "generate_cards_from_text", fake_text)
@@ -75,7 +74,7 @@ def test_text_upload_saves_deck(client, engine, monkeypatch):
     assert body["title"] == "bio"
     assert body["source"] == "text"
     assert [c["question"] for c in body["flashcards"]] == [c.question for c in CARDS]
-    assert seen == {"text": "Mitosis\n\nCell division", "from_ocr": False}
+    assert seen == {"text": "Mitosis\n\nCell division"}
 
     with Session(engine) as session:
         deck = session.scalar(select(Deck))
@@ -89,19 +88,19 @@ def test_text_upload_saves_deck(client, engine, monkeypatch):
 def test_pdf_goes_straight_to_openai(client, monkeypatch):
     seen = {}
 
-    async def fake_pdf(data, filename, *, focus=None, tag_mode=None):
+    async def fake_pdf(data, filename, *, focus=None):
         seen["filename"] = filename
         return CARDS
 
     async def fail_text(*args, **kwargs):
         raise AssertionError("PDFs must not go through the text path")
 
-    def fail_ocr(_):
-        raise AssertionError("PDFs must not go through OCR")
+    async def fail_image(*args, **kwargs):
+        raise AssertionError("PDFs must not go through the image path")
 
     monkeypatch.setattr(generate, "generate_cards_from_pdf", fake_pdf)
     monkeypatch.setattr(generate, "generate_cards_from_text", fail_text)
-    monkeypatch.setattr(generate, "extract_text_from_image", fail_ocr)
+    monkeypatch.setattr(generate, "generate_cards_from_image", fail_image)
 
     response = client.post(
         "/api/flashcards/generate",
@@ -120,41 +119,55 @@ def test_fake_pdf_is_rejected(client):
     assert response.status_code == 400
 
 
-def test_image_goes_through_ocr_then_openai(client, monkeypatch):
+PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 16
+JPG = b"\xff\xd8\xff\xe0" + b"0" * 16
+WEBP = b"RIFF\x00\x00\x00\x00WEBPVP8 " + b"0" * 16
+
+
+def test_image_goes_straight_to_openai(client, monkeypatch):
     seen = {}
 
-    monkeypatch.setattr(generate, "extract_text_from_image", lambda data: "  Krebs cycle\n\n\n\nATP ")
-
-    async def fake_text(text, *, from_ocr=False, focus=None, tag_mode=None):
-        seen["text"], seen["from_ocr"] = text, from_ocr
+    async def fake_image(data, *, focus=None):
+        seen["data"] = data
         return CARDS
 
-    monkeypatch.setattr(generate, "generate_cards_from_text", fake_text)
+    async def no_text(*args, **kwargs):
+        raise AssertionError("images must not be turned into text first")
+
+    monkeypatch.setattr(generate, "generate_cards_from_image", fake_image)
+    monkeypatch.setattr(generate, "generate_cards_from_text", no_text)
     response = client.post(
-        "/api/flashcards/generate", files={"file": ("page.png", b"\x89PNG", "image/png")}
+        "/api/flashcards/generate", files={"file": ("page.png", PNG, "image/png")}
     )
     assert response.status_code == 201
     assert response.json()["source"] == "image"
-    assert seen == {"text": "Krebs cycle\n\nATP", "from_ocr": True}
+    assert seen == {"data": PNG}
 
 
-def test_blank_ocr_result_is_422(client, monkeypatch):
-    monkeypatch.setattr(generate, "extract_text_from_image", lambda data: "  \n ")
+def test_image_is_sent_as_input_image_with_review_note(monkeypatch):
+    calls = []
+    monkeypatch.setattr(flashcards, "get_client", lambda: _fake_client(calls))
+    for data, mime in ((PNG, "image/png"), (JPG, "image/jpeg"), (WEBP, "image/webp")):
+        asyncio.run(flashcards.generate_cards_from_image(data, focus="Krebs cycle"))
+        parts = calls[-1]["input"][0]["content"]
+        assert parts[0]["type"] == "input_image"
+        assert parts[0]["image_url"].startswith(f"data:{mime};base64,")
+        assert "needs_review" in parts[1]["text"]
+        assert "<focus>Krebs cycle</focus>" in parts[1]["text"]
+
+
+def test_fake_image_is_400(client):
     response = client.post(
-        "/api/flashcards/generate", files={"file": ("page.jpg", b"x", "image/jpeg")}
+        "/api/flashcards/generate", files={"file": ("page.jpg", b"not an image", "image/jpeg")}
     )
-    assert response.status_code == 422
+    assert response.status_code == 400
 
 
-def test_missing_ocr_install_is_503(client, monkeypatch):
-    def unavailable(_):
-        raise OCRUnavailableError("OCR is not installed.")
-
-    monkeypatch.setattr(generate, "extract_text_from_image", unavailable)
-    response = client.post(
-        "/api/flashcards/generate", files={"file": ("page.jpg", b"x", "image/jpeg")}
-    )
-    assert response.status_code == 503
+def test_images_are_available_whenever_openai_is_configured(client, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    assert client.get("/api/flashcards/status").json() == {"configured": True, "images_available": True}
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    assert client.get("/api/flashcards/status").json() == {"configured": False, "images_available": False}
 
 
 def test_unsupported_type_is_415(client):
@@ -197,12 +210,11 @@ def test_text_is_chunked_and_merged(monkeypatch):
     monkeypatch.setattr(flashcards, "get_client", lambda: SimpleNamespace(responses=FakeResponses()))
     monkeypatch.setattr(flashcards.config, "GENERATION_CHUNK_CHARS", 20)
 
-    cards = asyncio.run(flashcards.generate_cards_from_text("aaaa bbbb cccc\n\ndddd eeee ffff", from_ocr=True))
+    cards = asyncio.run(flashcards.generate_cards_from_text("aaaa bbbb cccc\n\ndddd eeee ffff"))
 
     assert len(calls) == 2
     assert calls[0]["model"] == "gpt-5.6-sol"
     assert calls[0]["text_format"] is CardSet
-    assert "OCR" in calls[0]["input"][0]["content"][0]["text"]
     assert sorted(c.question for c in cards) == ["Q1?", "Q2?", "Shared?"]
 
 
@@ -267,7 +279,7 @@ def test_focus_is_added_to_pdf_request(monkeypatch):
 def test_focus_form_field_reaches_generator(client, monkeypatch):
     seen = {}
 
-    async def fake_text(text, *, from_ocr=False, focus=None, tag_mode=None):
+    async def fake_text(text, *, focus=None):
         seen["focus"] = focus
         return CARDS
 
@@ -285,7 +297,7 @@ def test_focus_form_field_reaches_generator(client, monkeypatch):
     assert too_long.status_code == 422
 
 
-# --- OCR "needs review" flags ---------------------------------------------------------
+# --- "needs review" flags ---------------------------------------------------------
 
 
 def test_needs_review_schema_is_strict_compatible():
@@ -296,12 +308,12 @@ def test_needs_review_schema_is_strict_compatible():
     assert "default" not in schema["properties"]["needs_review"]
 
 
-def test_ocr_prompt_asks_for_flags_and_text_prompt_does_not(monkeypatch):
+def test_image_prompt_asks_for_flags_and_text_prompt_does_not(monkeypatch):
     calls = []
     monkeypatch.setattr(flashcards, "get_client", lambda: _fake_client(calls))
-    asyncio.run(flashcards.generate_cards_from_text("notes", from_ocr=True))
-    asyncio.run(flashcards.generate_cards_from_text("notes", from_ocr=False))
-    assert "needs_review" in calls[0]["input"][0]["content"][0]["text"]
+    asyncio.run(flashcards.generate_cards_from_image(PNG))
+    asyncio.run(flashcards.generate_cards_from_text("notes"))
+    assert "needs_review" in calls[0]["input"][0]["content"][-1]["text"]
     assert "needs_review" not in calls[1]["input"][0]["content"][0]["text"]
 
 
@@ -318,14 +330,12 @@ def test_flagged_cards_are_saved_listed_and_editable(client, engine, monkeypatch
         CardDraft(question="What is the Krebs cycle?", answer="Smudged", needs_review=True),
         CardDraft(question="What is ATP?", answer="Energy currency."),
     ]
-    monkeypatch.setattr(generate, "extract_text_from_image", lambda data: "Krebs cycle ATP")
-
-    async def fake_text(text, *, from_ocr=False, focus=None, tag_mode=None):
+    async def fake_image(data, *, focus=None):
         return flagged
 
-    monkeypatch.setattr(generate, "generate_cards_from_text", fake_text)
+    monkeypatch.setattr(generate, "generate_cards_from_image", fake_image)
     created = client.post(
-        "/api/flashcards/generate", files={"file": ("page.png", b"\x89PNG", "image/png")}
+        "/api/flashcards/generate", files={"file": ("page.png", PNG, "image/png")}
     ).json()
     assert [c["needs_review"] for c in created["flashcards"]] == [True, False]
 
@@ -351,7 +361,7 @@ def test_flagged_cards_are_saved_listed_and_editable(client, engine, monkeypatch
 
 
 def test_card_edit_validation_and_privacy(client, engine, monkeypatch):
-    async def fake_text(text, *, from_ocr=False, focus=None, tag_mode=None):
+    async def fake_text(text, *, focus=None):
         return CARDS
 
     monkeypatch.setattr(generate, "generate_cards_from_text", fake_text)
@@ -429,7 +439,7 @@ def test_dedupe_validates_blank():
 
 
 def test_generated_blank_is_saved_on_the_card(client, engine, monkeypatch):
-    async def fake_text(text, *, from_ocr=False, focus=None, tag_mode=None):
+    async def fake_text(text, *, focus=None):
         return flashcards.dedupe_cards([
             CardDraft(question="What is mitosis?", answer="Cell division.", cloze_blank="Cell division"),
             CardDraft(question="What is meiosis?", answer="Makes gametes.", cloze_blank="invented"),
@@ -445,79 +455,70 @@ def test_generated_blank_is_saved_on_the_card(client, engine, monkeypatch):
     assert blanks == {"What is mitosis?": "Cell division", "What is meiosis?": None}
 
 
-# --- tag generation (general vs specific) -------------------------------------------
+# --- auto-tagging (HDBSCAN clusters named by the LLM) --------------------------------
 
 
-def _tagged(labels):
-    return [CardDraft(question="What is mitosis?", answer="Cell division.", labels=labels)]
+MANY = [CardDraft(question=f"Q{i}?", answer="A") for i in range(4)]
 
 
-def _generate_with(client, monkeypatch, labels, data=None):
-    async def fake_text(text, *, from_ocr=False, focus=None, tag_mode=None):
-        return _tagged(labels)
+def _generate_with(client, monkeypatch, tags, data=None):
+    seen = {}
+
+    async def fake_text(text, *, focus=None, **kwargs):
+        assert "tag_mode" not in kwargs  # generation itself no longer tags
+        return MANY
+
+    async def fake_auto_tag(cards, mode):
+        seen["mode"] = mode
+        return tags
 
     monkeypatch.setattr(generate, "generate_cards_from_text", fake_text)
-    return client.post(
+    monkeypatch.setattr(generate, "auto_tag", fake_auto_tag)
+    response = client.post(
         "/api/flashcards/generate", data=data or {},
         files={"file": ("bio.txt", b"Notes", "text/plain")},
     )
+    return response, seen
 
 
-def _saved_labels(engine):
+def _saved(engine, model):
     with Session(engine) as session:
-        return sorted(session.scalars(select(CardLabel.name)).all())
+        return sorted(session.scalars(select(model.name)).all())
 
 
-def test_labels_schema_is_strict_compatible():
-    from openai.lib._pydantic import to_strict_json_schema
-
-    schema = to_strict_json_schema(CardSet)["$defs"]["CardDraft"]
-    assert "labels" in schema["required"]
-    assert "default" not in schema["properties"]["labels"]
-
-
-def test_tag_modes_change_the_prompt(monkeypatch):
+def test_generation_prompts_no_longer_ask_for_labels(monkeypatch):
     calls = []
     monkeypatch.setattr(flashcards, "get_client", lambda: _fake_client(calls))
-    for mode in (None, "general", "specific"):
-        asyncio.run(flashcards.generate_cards_from_text("notes", tag_mode=mode))
-    asyncio.run(flashcards.generate_cards_from_pdf(b"%PDF-1.7", "a.pdf", tag_mode="specific"))
-    text = [c["input"][0]["content"][-1]["text"] for c in calls]
-    assert "labels" not in text[0]
-    assert "broad labels" in text[1] and "narrow labels" not in text[1]
-    assert "narrow labels" in text[2] and "broad labels" not in text[2]
-    assert "narrow labels" in text[3]  # PDFs get it too
-    assert all(c["instructions"] == flashcards.INSTRUCTIONS for c in calls)
+    asyncio.run(flashcards.generate_cards_from_text("notes"))
+    asyncio.run(flashcards.generate_cards_from_pdf(b"%PDF-1.7", "a.pdf"))
+    assert all("label" not in c["input"][0]["content"][-1]["text"] for c in calls)
+    assert "label" not in flashcards.INSTRUCTIONS
+    assert "labels" not in CardDraft.model_fields
 
 
-def test_dedupe_keeps_labels():
-    cards = [CardDraft(question="Q?", answer="A", labels=["genetics"])]
-    assert flashcards.dedupe_cards(cards)[0].labels == ["genetics"]
-
-
-def test_general_tags_are_saved_and_capped(client, engine, monkeypatch):
-    response = _generate_with(
-        client, monkeypatch, ["  Cell   Biology ", "cell biology", "Genetics", "extra"],
-        data={"tag_mode": "general"},
-    )
+def test_general_clusters_become_deck_labels(client, engine, monkeypatch):
+    tags = [["cell biology"], ["cell biology"], ["genetics"], ["genetics"]]
+    response, seen = _generate_with(client, monkeypatch, tags, data={"tag_mode": "general"})
     assert response.status_code == 201
-    assert _saved_labels(engine) == ["cell biology", "genetics"]  # normalized, deduped, max 2
-    assert client.get("/api/labels").json() == ["cell biology", "genetics"]
+    assert seen == {"mode": "general"}
+    assert _saved(engine, DeckLabel) == ["cell biology", "genetics"]
+    assert _saved(engine, CardTag) == []
 
 
-def test_specific_tags_allow_more_and_skip_invalid(client, engine, monkeypatch):
-    response = _generate_with(
-        client, monkeypatch, ["mitosis", "a, b", "", "x" * 41, "prophase", "spindle", "g1", "extra"],
-        data={"tag_mode": "SPECIFIC"},
-    )
+def test_specific_clusters_become_card_tags(client, engine, monkeypatch):
+    tags = [["krebs cycle"], ["krebs cycle"], [], ["glycolysis"]]
+    response, _ = _generate_with(client, monkeypatch, tags, data={"tag_mode": " SPECIFIC "})
     assert response.status_code == 201
-    assert _saved_labels(engine) == ["g1", "mitosis", "prophase", "spindle"]
+    assert _saved(engine, CardTag) == ["glycolysis", "krebs cycle", "krebs cycle"]
+    assert _saved(engine, DeckLabel) == []
 
 
-def test_no_tag_mode_means_no_labels_even_if_model_sends_some(client, engine, monkeypatch):
+def test_no_tag_mode_never_runs_tagging(client, engine, monkeypatch):
     for data in ({}, {"tag_mode": ""}, {"tag_mode": "  "}):
-        assert _generate_with(client, monkeypatch, ["genetics"], data=data).status_code == 201
-    assert _saved_labels(engine) == []
+        response, seen = _generate_with(client, monkeypatch, [["x"]] * 4, data=data)
+        assert response.status_code == 201
+        assert seen == {}
+    assert _saved(engine, CardTag) == [] and _saved(engine, DeckLabel) == []
 
 
 def test_unknown_tag_mode_is_422_before_any_generation(client, monkeypatch):
@@ -530,17 +531,3 @@ def test_unknown_tag_mode_is_422_before_any_generation(client, monkeypatch):
         files={"file": ("bio.txt", b"Notes", "text/plain")},
     )
     assert response.status_code == 422
-
-
-def test_tag_mode_reaches_generator(client, monkeypatch):
-    seen = []
-
-    async def fake_text(text, *, from_ocr=False, focus=None, tag_mode=None):
-        seen.append(tag_mode)
-        return CARDS
-
-    monkeypatch.setattr(generate, "generate_cards_from_text", fake_text)
-    files = {"file": ("bio.txt", b"Notes", "text/plain")}
-    for data in ({"tag_mode": "general"}, {"tag_mode": " Specific "}, {}):
-        assert client.post("/api/flashcards/generate", files=files, data=data).status_code == 201
-    assert seen == ["general", "specific", None]

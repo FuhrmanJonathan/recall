@@ -66,7 +66,11 @@ DATABASE_URL=sqlite:////absolute/path/to/recall.db npm run dev:api
 The parent directory must exist. The API reads environment variables from the
 process and loads optional settings from `apps/api/.env` for local development.
 Put `OPENAI_API_KEY=...` in that ignored file to enable AI note generation and
-quizzes. For HTTPS deployment, set `SESSION_COOKIE_SECURE=true`. Adding the session table is automatic for
+quizzes. Photos of written notes (PNG/JPG/WEBP) are sent straight to the same
+OpenAI model, so no local OCR model is needed. Auto-tagging embeds each card
+(`OPENAI_EMBEDDING_MODEL`, default `text-embedding-3-small`), groups similar
+cards with HDBSCAN (scikit-learn), and then asks the model to name each group,
+so every tag covers at least two cards. For HTTPS deployment, set `SESSION_COOKIE_SECURE=true`. Adding the session table is automatic for
 existing databases; future changes to existing table columns will need migrations.
 
 ### Google sign-in setup

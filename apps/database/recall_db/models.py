@@ -100,7 +100,7 @@ class Flashcard(TimestampMixin, Base):
         ForeignKey("decks.id", ondelete="CASCADE"), index=True)
     question: Mapped[str] = mapped_column(Text)
     answer: Mapped[str] = mapped_column(Text)
-    # Set when OCR / generation was unsure about this card; cleared once the student edits it.
+    # Set when generation (e.g. from a hard-to-read photo) was unsure about this card; cleared once the student edits it.
     needs_review: Mapped[bool] = mapped_column(default=False, server_default="0")
     # Key term hidden in the fill-in-the-blank quiz, picked when the card was generated.
     # Cards without a valid saved blank cannot be used in a quiz.
