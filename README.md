@@ -54,8 +54,8 @@ set `WEB_URL` to the frontend's public URL outside local development.
 
 Flashcard generation and deck retrieval require login. Generated decks belong
 to the logged-in user, and other users cannot retrieve them. Existing demo decks
-remain assigned to the sample user. Password reset and change routes still
-return `501` pending their implementation.
+remain assigned to the sample user. The password change route still returns
+`501`; password reset is available through email.
 
 To use a different SQLite file, export `DATABASE_URL` before starting the API:
 
@@ -68,6 +68,53 @@ process and loads optional settings from `apps/api/.env` for local development.
 Put `OPENAI_API_KEY=...` in that ignored file to enable AI note generation and
 quizzes. For HTTPS deployment, set `SESSION_COOKIE_SECURE=true`. Adding the session table is automatic for
 existing databases; future changes to existing table columns will need migrations.
+
+### Google sign-in setup
+
+Google sign-in is optional. Set `GOOGLE_CLIENT_ID` in `apps/api/.env` to show a
+**Continue with Google** button on login and signup. The frontend reads the public
+client ID from the API, so no frontend environment variable or client secret is needed.
+
+1. Open [Google Auth Platform](https://console.cloud.google.com/auth/overview),
+   select or create a project, and click **Get started** if prompted.
+2. Fill in **Branding** with the app name (Recall), support email, and contact
+   information. Choose **External** under **Audience** for personal Google accounts;
+   add your testing accounts under **Test users** while developing.
+3. Open **Clients → Create client** and choose **Web application**.
+4. Under **Authorized JavaScript origins**, add `http://localhost` and
+   `http://localhost:3000`. Add your exact HTTPS frontend origin for production.
+   Origins have no path; use the actual port if your frontend runs elsewhere.
+   Leave **Authorized redirect URIs** empty: this integration uses a popup and
+   JavaScript callback, not a redirect callback.
+5. Copy the **Client ID** into the existing `apps/api/.env` (preserve other settings):
+
+   ```dotenv
+   GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+   ```
+
+6. Restart the API (`npm run dev:api`, or restart `npm run dev`) and visit
+   `http://localhost:3000/login`. Select **Continue with Google**.
+
+For production, complete the branding/domain information Google requests, review
+the app's publishing status under **Audience**, register the production origin,
+and set `SESSION_COOKIE_SECURE=true` in the API environment. Only basic sign-in
+is used; no Google Drive or Gmail access is requested.
+
+See Google's [client setup guide](https://developers.google.com/identity/gsi/web/guides/get-google-api-clientid)
+and [Auth Platform guide](https://support.google.com/cloud/answer/15544987).
+
+The API verifies Google's signed ID token and its audience, issuer, expiry,
+verified email, and browser-bound nonce before issuing a normal Recall session.
+`GET /api/auth/google/challenge` supplies the client ID and a ten-minute challenge;
+`POST /api/auth/google` accepts `{credential, password?}` and consumes the challenge
+once on success. Existing databases automatically gain `google_identities` and
+`google_login_challenges` tables on startup; existing user rows are unchanged.
+
+An existing email/password account requires its Recall password before linking
+Google, preserving its user ID and decks. Subsequent Google logins use Google's
+stable subject ID. Each Recall account links to one Google account. Google-created
+accounts can establish a password through **Forgot password?** if email delivery
+is configured. Logout revokes the Recall session; it does not sign out of Google.
 
 ### Reviewing and editing decks
 
@@ -82,6 +129,14 @@ After revealing an answer in **Review due cards**, press **1 Again**, **2 Hard**
 `POST /api/decks` creates an empty owned deck from `{title}`. `PUT /api/decks/{deck_id}` atomically saves `{title, version, flashcards: [{id?, question, answer, needs_review}]}`. Omit `id` for new cards; existing IDs must belong to that deck. Omitted existing cards are deleted. The version returned by GET is required; stale saves receive `409` without modifying cards. Existing SQLite decks receive version 1 on startup.
 
 The library checks `/api/flashcards/status` before offering generation. This reports configuration, not credential validity. Reminder preferences can be saved independently of email delivery; delivering reminders still requires the email configuration and reminder service.
+
+### Choosing study material
+
+On **Study**, use **What do you want to study?** to search and select multiple decks or tags. Cards match any selected deck and any selected tag; choosing both groups narrows the result to tagged cards inside those decks. The matching count updates before starting. Clear the selection to return to all cards. Choices are remembered per account in this browser; direct **Study this deck** links override the remembered focus.
+
+**Session options** controls the batch size (default 20, maximum 100) and optionally shuffles the order within that batch. Cards are selected oldest-due first; practice also includes upcoming cards and leaves scheduling unchanged. Pagination follows the batch size. Returning from the card editor restores the same selection and remaining session.
+
+`GET /api/study/cards` accepts repeated `deck_ids` and `labels` parameters, alongside the existing singular `deck_id` and `label`. Decks must all belong to the signed-in user. Tag matches are deduplicated, so a card with several selected tags appears once.
 
 ### Daily study goals
 

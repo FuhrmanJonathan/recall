@@ -1,18 +1,24 @@
 import hashlib
+import json
 import time
 from http.cookies import SimpleCookie
+from types import SimpleNamespace
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
+from google.auth import crypt, jwt
+from google.auth.exceptions import TransportError
 from pwdlib import PasswordHash
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import generate, main
+from app import auth, config, generate, main
 from app.deps import get_session
 from app.flashcards import CardDraft
 from recall_db.database import create_database_engine, create_tables
-from recall_db.models import AuthSession, Deck, PasswordResetToken, User
+from recall_db.models import AuthSession, Deck, GoogleIdentity, GoogleLoginChallenge, PasswordResetToken, User
 
 
 CREDENTIALS = {"email": "student@example.com", "password": "study-password"}
@@ -342,3 +348,204 @@ def test_unauthenticated_generation_never_calls_generator(client, engine, monkey
     with Session(engine) as session:
         assert session.scalars(select(User)).all() == []
         assert session.scalars(select(Deck)).all() == []
+
+
+@pytest.fixture(scope="module")
+def google_key():
+    return rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+
+@pytest.fixture()
+def google_token(client, monkeypatch, google_key):
+    """Exercise real JWT verification; only Google's certificate HTTP call is faked."""
+    monkeypatch.setattr(config, "GOOGLE_CLIENT_ID", "recall-test.apps.googleusercontent.com")
+    public_key = google_key.public_key().public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode()
+
+    def certificate_request(url, method, timeout):
+        assert url == "https://www.googleapis.com/oauth2/v1/certs"
+        assert method == "GET"
+        assert timeout == 10
+        return SimpleNamespace(status=200, data=json.dumps({"test-key": public_key}).encode())
+
+    monkeypatch.setattr(auth, "GoogleRequest", lambda: certificate_request)
+    signer = crypt.RSASigner(google_key, key_id="test-key")
+
+    def make_token(**overrides):
+        nonce = client.get("/api/auth/google/challenge").json()["nonce"]
+        payload = {
+            "iss": "https://accounts.google.com", "aud": config.GOOGLE_CLIENT_ID,
+            "sub": "google-user-123", "email": "Student@example.com", "email_verified": True,
+            "nonce": nonce, "iat": int(time.time()), "exp": int(time.time()) + 3600,
+        }
+        payload.update(overrides)
+        return jwt.encode(signer, payload).decode()
+
+    return make_token
+
+
+def test_google_disabled_without_configuration(client, monkeypatch):
+    monkeypatch.setattr(config, "GOOGLE_CLIENT_ID", "")
+    response = client.get("/api/auth/google/challenge")
+    assert response.json() == {"client_id": None, "nonce": None}
+    assert response.headers["cache-control"] == "no-store"
+    assert "set-cookie" not in response.headers
+    assert client.post("/api/auth/google", json={"credential": "token"}).status_code == 503
+
+
+def test_google_challenge_cookie_and_reuse(client, engine, google_token, monkeypatch):
+    monkeypatch.setattr(config, "SESSION_COOKIE_SECURE", True)
+    response = client.get("/api/auth/google/challenge")
+    nonce = response.json()["nonce"]
+    cookie = SimpleCookie(response.headers["set-cookie"])["recall_google_nonce"]
+    assert cookie["httponly"] and cookie["secure"]
+    assert cookie["samesite"].lower() == "strict"
+    assert cookie["path"] == "/api/auth/google"
+    assert int(cookie["max-age"]) == 600
+    assert response.headers["cache-control"] == "no-store"
+    # TestClient is HTTP, so explicitly send the Secure cookie for this check.
+    again = client.get("/api/auth/google/challenge", headers={"cookie": f"recall_google_nonce={nonce}"})
+    assert again.json() == response.json()
+    with Session(engine) as session:
+        assert len(session.scalars(select(GoogleLoginChallenge)).all()) == 1
+        assert session.get(GoogleLoginChallenge, nonce) is None
+
+
+def test_google_signup_and_returning_subject_preserve_account(client, engine, google_token):
+    credential = google_token()
+    nonce = client.cookies["recall_google_nonce"]
+    response = client.post("/api/auth/google", json={"credential": credential})
+    assert response.status_code == 200, response.text
+    user = response.json()
+    assert user == {"id": user["id"], "email": "student@example.com"}
+    assert client.get("/api/auth/me").json() == user
+    assert "recall_google_nonce" not in client.cookies
+    with Session(engine) as session:
+        assert session.get(GoogleIdentity, "google-user-123").user_id == user["id"]
+        assert session.get(User, user["id"]).password_hash.startswith("$argon2")
+        assert session.scalars(select(GoogleLoginChallenge)).all() == []
+
+    # Even replaying the consumed nonce cookie cannot issue another session.
+    replay = client.post("/api/auth/google", json={"credential": credential}, headers={
+        "cookie": f"recall_google_nonce={nonce}",
+    })
+    assert replay.status_code == 403
+    original_session = response.cookies[COOKIE_NAME]
+    # A changed email must still resolve to the original subject's user.
+    response = client.post("/api/auth/google", json={"credential": google_token(email="changed@example.com")})
+    assert response.status_code == 200
+    assert response.json() == user
+    with Session(engine) as session:
+        assert len(session.scalars(select(User)).all()) == 1
+        assert session.get(AuthSession, hashlib.sha256(original_session.encode()).hexdigest()) is None
+    token = response.cookies[COOKIE_NAME]
+    client.post("/api/auth/logout")
+    assert client.get("/api/auth/me", headers=cookie_header(token)).status_code == 401
+
+
+def test_google_link_requires_password_and_preserves_decks(client, engine, google_token):
+    original = signup(client).json()
+    with Session(engine) as session:
+        deck = Deck(user_id=original["id"], title="Keep my deck")
+        session.add(deck)
+        session.commit()
+        deck_id = deck.id
+    client.post("/api/auth/logout")
+    credential = google_token()
+    response = client.post("/api/auth/google", json={"credential": credential})
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "link_required"
+    assert client.get("/api/auth/me").status_code == 401
+    assert client.post("/api/auth/google", json={
+        "credential": credential, "password": "wrong",
+    }).status_code == 401
+    with Session(engine) as session:
+        assert session.scalars(select(GoogleIdentity)).all() == []
+        assert session.scalars(select(AuthSession)).all() == []
+    response = client.post("/api/auth/google", json={
+        "credential": credential, "password": CREDENTIALS["password"],
+    })
+    assert response.status_code == 200
+    assert response.json() == original
+    assert client.get(f"/api/decks/{deck_id}").status_code == 200
+    client.post("/api/auth/logout")
+    assert client.post("/api/auth/login", json=CREDENTIALS).status_code == 200
+    # A different Google subject cannot replace an existing link, even with a password.
+    response = client.post("/api/auth/google", json={
+        "credential": google_token(sub="different-google-account"), "password": CREDENTIALS["password"],
+    })
+    assert response.status_code == 409
+
+
+@pytest.mark.parametrize("overrides, status", [
+    ({"aud": "another-app"}, 401),
+    ({"iss": "https://attacker.example"}, 401),
+    ({"exp": int(time.time()) - 1}, 401),
+    ({"email_verified": False}, 401),
+    ({"email_verified": "true"}, 401),
+    ({"email": "not-an-email"}, 401),
+    ({"sub": ""}, 401),
+    ({"nonce": "another-browser"}, 403),
+])
+def test_google_rejects_invalid_claims(client, engine, google_token, overrides, status):
+    response = client.post("/api/auth/google", json={"credential": google_token(**overrides)})
+    assert response.status_code == status
+    assert "set-cookie" not in response.headers
+    with Session(engine) as session:
+        assert session.scalars(select(User)).all() == []
+        assert session.scalars(select(AuthSession)).all() == []
+        assert session.scalars(select(GoogleIdentity)).all() == []
+
+
+def test_google_rejects_forged_signature(client, google_token):
+    original = google_token()
+    claims = jwt.decode(original, verify=False)
+    attacker_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    forged = jwt.encode(crypt.RSASigner(attacker_key, key_id="test-key"), claims).decode()
+    assert client.post("/api/auth/google", json={"credential": forged}).status_code == 401
+
+
+@pytest.mark.parametrize("cookie", [None, "attacker-cookie"])
+def test_google_requires_browser_challenge(client, google_token, cookie):
+    credential = google_token()
+    client.cookies.clear()
+    headers = {"cookie": f"recall_google_nonce={cookie}"} if cookie else {}
+    response = client.post("/api/auth/google", json={"credential": credential}, headers=headers)
+    assert response.status_code == 403
+
+
+def test_google_rejects_expired_challenge_and_cleans_it_up(client, engine, google_token):
+    credential = google_token()
+    nonce = client.cookies["recall_google_nonce"]
+    with Session(engine) as session:
+        session.get(GoogleLoginChallenge, hashlib.sha256(nonce.encode()).hexdigest()).expires_at = 0
+        session.commit()
+    assert client.post("/api/auth/google", json={"credential": credential}).status_code == 403
+    fresh = client.get("/api/auth/google/challenge").json()["nonce"]
+    assert fresh != nonce
+    with Session(engine) as session:
+        assert len(session.scalars(select(GoogleLoginChallenge)).all()) == 1
+
+
+def test_google_certificate_outage_does_not_create_account(client, engine, google_token, monkeypatch):
+    credential = google_token()
+
+    def unavailable(*args, **kwargs):
+        raise TransportError("unavailable")
+
+    monkeypatch.setattr(auth, "GoogleRequest", lambda: unavailable)
+    assert client.post("/api/auth/google", json={"credential": credential}).status_code == 503
+    with Session(engine) as session:
+        assert session.scalars(select(User)).all() == []
+
+
+def test_google_only_user_can_set_password_via_reset(client, google_token, monkeypatch):
+    user = client.post("/api/auth/google", json={"credential": google_token()}).json()
+    sent = []
+    monkeypatch.setattr(auth, "send_password_reset_email", lambda email, token: sent.append(token))
+    client.post("/api/auth/password/forgot", json={"email": user["email"]})
+    response = client.post("/api/auth/password/reset", json={"token": sent[0], "password": "my-new-password"})
+    assert response.status_code == 200
+    assert client.get("/api/auth/me").status_code == 401
+    assert client.post("/api/auth/login", json={"email": user["email"], "password": "my-new-password"}).status_code == 200

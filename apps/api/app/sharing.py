@@ -5,7 +5,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.deps import get_current_user, get_session
-from recall_db.models import Deck, Flashcard, User
+from recall_db.models import Deck, Flashcard, QuizQuestion, User
 
 router = APIRouter(prefix="/api", tags=["sharing"])
 
@@ -110,8 +110,22 @@ def copy_public_deck(
     deck = Deck(user_id=user.id, title=source.title,
                 description=source.description, subject=source.subject,
                 is_public=False)
-    deck.flashcards.extend(Flashcard(question=c.question, answer=c.answer)
-                           for c in source.flashcards)
+    copied_cards = []
+    for card in source.flashcards:
+        copied = Flashcard(
+            question=card.question,
+            answer=card.answer,
+            cloze_blank=card.cloze_blank,
+        )
+        if card.quiz_question is not None:
+            copied.quiz_question = QuizQuestion(
+                question=card.quiz_question.question,
+                answer=card.quiz_question.answer,
+                context=card.quiz_question.context,
+                version=1,
+            )
+        copied_cards.append(copied)
+    deck.flashcards.extend(copied_cards)
     session.add(deck)
     session.commit()
     return {"id": deck.id, "title": deck.title, "card_count": len(deck.flashcards)}
