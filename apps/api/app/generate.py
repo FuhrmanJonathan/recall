@@ -2,13 +2,15 @@
 
 import importlib.util
 import os
+import zlib
+from collections import Counter
 from pathlib import PurePath
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
-from sqlalchemy import select, update
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app import config
@@ -33,12 +35,14 @@ from app.flashcards import (
 from app.ocr import OCRError, OCRUnavailableError, extract_text_from_image
 from app.study import normalize_label
 from app.text import clean_text
-from recall_db.models import CardLabel, Deck, Flashcard, User
+from recall_db.models import COLORS, CardTag, Deck, DeckLabel, Flashcard, User
 
 router = APIRouter(prefix="/api")
 
-# Most labels kept per card for each tag mode (broad tags are few, specific tags are more).
-_MAX_LABELS = {"general": 2, "specific": 4}
+# "general" -> deck labels (broad topics). "specific" -> card tags (exact concepts).
+_MAX_LABELS = {"general": 2, "specific": 4}   # kept per card from the model's output
+_MAX_DECK_LABELS = 3                          # auto-generated deck labels
+_MAX_ITEMS = 10                               # labels per deck / tags per card
 
 _SIZE_LIMITS = {
     SourceKind.TEXT: config.MAX_UPLOAD_BYTES,
@@ -48,12 +52,28 @@ _SIZE_LIMITS = {
 }
 
 
+def default_color(name: str) -> str:
+    return COLORS[zlib.crc32(name.encode()) % len(COLORS)]
+
+
 class ImageOut(BaseModel):
     """Image metadata only. The bytes are served by GET /api/images/{id}."""
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     side: str
+    
+class NamedOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str
+    color: str
+
+class NamedIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=40)]
+    color: str = ""
 
 
 class CardOut(BaseModel):
@@ -63,7 +83,13 @@ class CardOut(BaseModel):
     question: str
     answer: str
     needs_review: bool = False
-    images: list[ImageOut] = []  #images
+    tags: list[NamedOut] = []
+    images: list[ImageOut] = []
+
+    @field_validator("tags")
+    @classmethod
+    def _sorted_tags(cls, v: list[NamedOut]) -> list[NamedOut]:
+        return sorted(v, key=lambda t: t.name)
 
 
 class DeckOut(BaseModel):
@@ -72,11 +98,58 @@ class DeckOut(BaseModel):
     id: int
     title: str
     version: int = 1
+    labels: list[NamedOut] = []
     flashcards: list[CardOut]
 
 
 class GeneratedDeckOut(DeckOut):
     source: str  # "pdf", "text", "docx" or "image"
+
+
+def _deck_out(deck: Deck) -> DeckOut:
+    return DeckOut(
+        id=deck.id, title=deck.title, version=deck.version,
+        labels=[NamedOut.model_validate(l) for l in sorted(deck.labels, key=lambda l: l.name)],
+        flashcards=[CardOut.model_validate(c) for c in sorted(deck.flashcards, key=lambda c: c.id)],
+    )
+
+
+def clean_items(raw: list[NamedIn], limit: int, known: dict[str, str]) -> dict[str, str]:
+    """Normalize names to {name: color}. A color already stored for the name always wins."""
+    out: dict[str, str] = {}
+    for item in raw:
+        name = " ".join(item.name.lower().split())
+        if not name:
+            continue
+        if len(name) > 40:
+            raise HTTPException(422, "Labels and tags can be up to 40 characters.")
+        color = known.get(name) or (item.color if item.color in COLORS else default_color(name))
+        out.setdefault(name, color)
+    if len(out) > limit:
+        raise HTTPException(422, f"Use up to {limit} per deck or card.")
+    return out
+
+
+def sync_items(rel: list, model: type, items: dict[str, str]) -> None:
+    """Remove rows that are gone and add new ones. Existing rows keep their color."""
+    for row in list(rel):
+        if row.name not in items:
+            rel.remove(row)
+    have = {row.name for row in rel}
+    for name, color in items.items():
+        if name not in have:
+            rel.append(model(name=name, color=color))
+
+
+def known_label_colors(session: Session, user_id: int) -> dict[str, str]:
+    """One color per label name across all of this user's decks."""
+    rows = session.execute(
+        select(DeckLabel.name, func.min(DeckLabel.color))
+        .join(Deck, Deck.id == DeckLabel.deck_id)
+        .where(Deck.user_id == user_id)
+        .group_by(DeckLabel.name)
+    ).all()
+    return {name: color for name, color in rows}
 
 
 @router.get("/flashcards/status")
@@ -100,9 +173,9 @@ async def generate_flashcards(
     """Turn an uploaded file of class notes into a saved deck of flashcards.
 
     ``focus`` is optional free text (e.g. "DNA replication") telling the generator which
-    topic to put extra emphasis on. ``tag_mode`` is optional too: ``"general"`` labels each
-    card with 1-2 broad subject areas, ``"specific"`` with 2-4 narrow concepts. Labels are
-    the same ones the Study page filters on. Leave it out for no tags.
+    topic to put extra emphasis on. ``tag_mode`` is optional too: ``"general"`` gives the
+    deck up to 3 broad labels, ``"specific"`` gives each card 2-4 exact tags.
+    Leave it out for neither.
     """
     filename = file.filename or ""
     kind = detect_source_kind(filename)
@@ -139,12 +212,7 @@ async def generate_flashcards(
 
     deck_title = (title or PurePath(filename).stem or "Untitled deck").strip()[:200]
     deck = await run_in_threadpool(_save_deck, session, user, deck_title, cards, mode)
-    return GeneratedDeckOut(
-        id=deck.id,
-        title=deck.title,
-        flashcards=[CardOut.model_validate(card) for card in deck.flashcards],
-        source=kind.value,
-    )
+    return GeneratedDeckOut(**_deck_out(deck).model_dump(), source=kind.value)
 
 
 @router.get("/decks/{deck_id}")
@@ -156,10 +224,7 @@ def get_deck(
     deck = session.get(Deck, deck_id)
     if deck is None or deck.user_id != user.id:
         raise HTTPException(status_code=404, detail="Deck not found.")
-    return DeckOut(
-        id=deck.id, title=deck.title, version=deck.version,
-        flashcards=[CardOut.model_validate(card) for card in sorted(deck.flashcards, key=lambda card: card.id)],
-    )
+    return _deck_out(deck)
 
 
 class DeckCardIn(BaseModel):
@@ -169,6 +234,9 @@ class DeckCardIn(BaseModel):
     question: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2_000)]
     answer: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=5_000)]
     needs_review: bool = False
+    tags: list[NamedIn] = Field(default_factory=list, max_length=_MAX_ITEMS)
+    # The editor echoes each card's images back. Accept and ignore them, so a save can
+    # never add, change, or delete an image (those use /api/cards/{id}/images).
     images: list[Any] = Field(default_factory=list, exclude=True)
 
 
@@ -177,6 +245,7 @@ class DeckUpdate(BaseModel):
 
     title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
     version: int = Field(ge=1)
+    labels: list[NamedIn] = Field(default_factory=list, max_length=_MAX_ITEMS)
     flashcards: list[DeckCardIn] = Field(max_length=1000)
 
 
@@ -197,6 +266,18 @@ def update_deck(
     ids = [card.id for card in body.flashcards if card.id is not None]
     if len(ids) != len(set(ids)) or any(card_id not in existing for card_id in ids):
         raise HTTPException(422, "Cards must belong to this deck and appear only once. Reload the deck and try again.")
+
+    # Validate labels and tags BEFORE touching anything. Tag colors are scoped to this deck:
+    # a name already used in this deck keeps its color, and later cards in this save agree.
+    label_items = clean_items(body.labels, _MAX_ITEMS, known_label_colors(session, user.id))
+    tag_colors = {t.name: t.color for c in deck.flashcards for t in c.tags}
+    tag_items: list[dict[str, str]] = []
+    for draft in body.flashcards:
+        items = clean_items(draft.tags, _MAX_ITEMS, tag_colors)
+        for name, color in items.items():
+            tag_colors.setdefault(name, color)
+        tag_items.append(items)
+
     # Claim this revision before editing cards, so a stale tab cannot delete newer work.
     claimed = session.execute(update(Deck).where(
         Deck.id == deck_id, Deck.user_id == user.id, Deck.version == body.version,
@@ -204,15 +285,19 @@ def update_deck(
     if claimed.rowcount != 1:
         session.rollback()
         raise HTTPException(409, "This deck changed in another tab. Your edits have not been saved. Copy anything you need, then reload the latest deck.")
-    # Deletions cascade to labels, images, and reviews.
+    # Deletions cascade to tags, images, and reviews.
     kept = set(ids)
     for card_id, card in existing.items():
         if card_id not in kept:
             session.delete(card)
-    for draft in body.flashcards:
+    sync_items(deck.labels, DeckLabel, label_items)
+    for draft, items in zip(body.flashcards, tag_items):
         if draft.id is None:
-            session.add(Flashcard(deck_id=deck.id, question=draft.question,
-                                  answer=draft.answer, needs_review=draft.needs_review))
+            session.add(Flashcard(
+                deck_id=deck.id, question=draft.question, answer=draft.answer,
+                needs_review=draft.needs_review,
+                tags=[CardTag(name=n, color=c) for n, c in items.items()],
+            ))
         else:
             card = existing[draft.id]
             preserve_question(card)
@@ -220,12 +305,10 @@ def update_deck(
             card.answer = draft.answer
             card.needs_review = draft.needs_review
             _drop_stale_blank(card)
+            sync_items(card.tags, CardTag, items)
     session.commit()
     session.expire(deck)
-    return DeckOut(
-        id=deck.id, title=deck.title, version=deck.version,
-        flashcards=[CardOut.model_validate(card) for card in sorted(deck.flashcards, key=lambda card: card.id)],
-    )
+    return _deck_out(deck)
 
 
 class CardUpdate(BaseModel):
@@ -313,7 +396,7 @@ async def _make_cards(
 def _clean_labels(raw: list[str], tag_mode: str | None) -> list[str]:
     """Normalize model labels the same way the Study page does; drop bad ones and cap by mode."""
     if tag_mode not in _MAX_LABELS:
-        return []  # no tags were asked for, so ignore anything the model sent anyway
+        return []  # nothing was asked for, so ignore anything the model sent anyway
     labels: list[str] = []
     for name in raw:
         try:
@@ -338,13 +421,19 @@ def _save_deck(
     ]
     for flashcard in flashcards:
         preserve_question(flashcard)
+
+    names = [_clean_labels(card.labels, tag_mode) for card in cards]
+    if tag_mode == "general":
+        # Broad topics become DECK labels: the most common ones across all cards.
+        known = known_label_colors(session, user.id)
+        top = Counter(n for ns in names for n in ns).most_common(_MAX_DECK_LABELS)
+        deck.labels = [DeckLabel(name=n, color=known.get(n) or default_color(n)) for n, _ in top]
+    elif tag_mode == "specific":
+        # Exact concepts become CARD tags, scoped to this deck.
+        for flashcard, ns in zip(flashcards, names):
+            flashcard.tags = [CardTag(name=n, color=default_color(n)) for n in ns]
+
     deck.flashcards.extend(flashcards)
     session.add(deck)
-    session.flush()  # assigns card ids so labels can point at them
-    for flashcard, draft in zip(flashcards, cards):
-        session.add_all(
-            CardLabel(flashcard_id=flashcard.id, name=name)
-            for name in _clean_labels(draft.labels, tag_mode)
-        )
     session.commit()
     return deck
