@@ -3,7 +3,7 @@
   PDF            -> sent to OpenAI as-is
   .txt / .md     -> decoded locally, then text to OpenAI
   .docx          -> text extracted locally, then text to OpenAI
-  png/jpg/webp   -> written notes: local OCR model first, then text to OpenAI
+  png/jpg/webp   -> written notes: sent to OpenAI as an image (the chat model reads it)
 """
 
 import io

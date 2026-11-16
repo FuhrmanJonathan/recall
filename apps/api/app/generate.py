@@ -1,6 +1,5 @@
 """Upload notes -> extract text (if needed) -> OpenAI flashcards -> save as a Deck."""
 
-import importlib.util
 import os
 import zlib
 from collections import Counter
@@ -24,23 +23,22 @@ from app.documents import (
     extract_docx_text,
 )
 from app.quiz_questions import preserve_question
+from app.autotag import TAG_MODES, auto_tag
 from app.flashcards import (
-    TAG_MODES,
     CardDraft,
     GenerationError,
+    generate_cards_from_image,
     generate_cards_from_pdf,
     generate_cards_from_text,
     normalize_focus,
 )
-from app.ocr import OCRError, OCRUnavailableError, extract_text_from_image
-from app.study import normalize_label
 from app.text import clean_text
 from recall_db.models import COLORS, CardTag, Deck, DeckLabel, Flashcard, User
 
 router = APIRouter(prefix="/api")
 
-# "general" -> deck labels (broad topics). "specific" -> card tags (exact concepts).
-_MAX_LABELS = {"general": 2, "specific": 4}   # kept per card from the model's output
+# "general" -> deck labels (broad topics). "specific" -> card tags (one concept per card).
+# Both come from app.autotag (HDBSCAN clusters named by the LLM).
 _MAX_DECK_LABELS = 3                          # auto-generated deck labels
 _MAX_ITEMS = 10                               # labels per deck / tags per card
 
@@ -155,10 +153,10 @@ def known_label_colors(session: Session, user_id: int) -> dict[str, str]:
 @router.get("/flashcards/status")
 def generation_status(user: User = Depends(get_current_user)) -> dict[str, bool]:
     """Read configuration only; never validate credentials with a paid request."""
-    return {
-        "configured": bool(os.getenv("OPENAI_API_KEY", "").strip()),
-        "images_available": all(importlib.util.find_spec(name) is not None for name in ("PIL", "torch", "transformers")),
-    }
+    configured = bool(os.getenv("OPENAI_API_KEY", "").strip())
+    # Photos are read by the same chat model as everything else, so they work whenever
+    # generation does. The key is kept for older frontends.
+    return {"configured": configured, "images_available": configured}
 
 
 @router.post("/flashcards/generate", status_code=201)
@@ -174,8 +172,8 @@ async def generate_flashcards(
 
     ``focus`` is optional free text (e.g. "DNA replication") telling the generator which
     topic to put extra emphasis on. ``tag_mode`` is optional too: ``"general"`` gives the
-    deck up to 3 broad labels, ``"specific"`` gives each card 2-4 exact tags.
-    Leave it out for neither.
+    deck up to 3 broad labels, ``"specific"`` groups similar cards and gives each group one
+    concept tag (a tag always covers at least 2 cards). Leave it out for neither.
     """
     filename = file.filename or ""
     kind = detect_source_kind(filename)
@@ -197,11 +195,7 @@ async def generate_flashcards(
         )
 
     try:
-        cards = await _make_cards(kind, filename, data, normalize_focus(focus), mode)
-    except OCRUnavailableError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
-    except OCRError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        cards = await _make_cards(kind, filename, data, normalize_focus(focus))
     except GenerationError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
     except ValueError as exc:
@@ -210,8 +204,11 @@ async def generate_flashcards(
     if not cards:
         raise HTTPException(status_code=422, detail="No flashcards could be generated.")
 
+    # Tagging runs after generation: cluster the cards, then name the clusters.
+    tags = await auto_tag(cards, mode) if mode else None
+
     deck_title = (title or PurePath(filename).stem or "Untitled deck").strip()[:200]
-    deck = await run_in_threadpool(_save_deck, session, user, deck_title, cards, mode)
+    deck = await run_in_threadpool(_save_deck, session, user, deck_title, cards, mode, tags)
     return GeneratedDeckOut(**_deck_out(deck).model_dump(), source=kind.value)
 
 
@@ -363,53 +360,34 @@ def _drop_stale_blank(card: Flashcard) -> None:
 
 
 async def _make_cards(
-    kind: SourceKind, filename: str, data: bytes, focus: str | None = None,
-    tag_mode: str | None = None,
+    kind: SourceKind, filename: str, data: bytes, focus: str | None = None
 ) -> list[CardDraft]:
-    # Prong 1a: PDFs go straight to OpenAI.
+    # PDFs and photos of written notes go straight to OpenAI, which reads them itself.
     if kind is SourceKind.PDF:
         if not data.startswith(PDF_MAGIC):
             raise ValueError("This file is not a valid PDF.")
-        return await generate_cards_from_pdf(data, filename, focus=focus, tag_mode=tag_mode)
+        return await generate_cards_from_pdf(data, filename, focus=focus)
+    if kind is SourceKind.IMAGE:
+        return await generate_cards_from_image(data, focus=focus)
 
-    # Prong 1b: other readable documents -> plain text -> OpenAI.
-    # Prong 2: written notes (images) -> OCR model -> plain text -> OpenAI.
-    from_ocr = kind is SourceKind.IMAGE
+    # Other readable documents -> plain text -> OpenAI.
     if kind is SourceKind.TEXT:
         raw = decode_text(data)
-    elif kind is SourceKind.DOCX:
-        raw = await run_in_threadpool(extract_docx_text, data)
     else:
-        raw = await run_in_threadpool(extract_text_from_image, data)
+        raw = await run_in_threadpool(extract_docx_text, data)
 
     text = clean_text(raw)  # same cleanup the /api/text endpoints use
     if not text:
-        if from_ocr:
-            raise OCRError("No readable text was found in this image.")
         raise ValueError("Text is empty.")
     if len(text) > config.MAX_TEXT_CHARS:
         raise ValueError(f"Text is too long (max {config.MAX_TEXT_CHARS} characters).")
 
-    return await generate_cards_from_text(text, from_ocr=from_ocr, focus=focus, tag_mode=tag_mode)
-
-
-def _clean_labels(raw: list[str], tag_mode: str | None) -> list[str]:
-    """Normalize model labels the same way the Study page does; drop bad ones and cap by mode."""
-    if tag_mode not in _MAX_LABELS:
-        return []  # nothing was asked for, so ignore anything the model sent anyway
-    labels: list[str] = []
-    for name in raw:
-        try:
-            label = normalize_label(name)
-        except ValueError:
-            continue
-        if label not in labels:
-            labels.append(label)
-    return labels[: _MAX_LABELS[tag_mode]]
+    return await generate_cards_from_text(text, focus=focus)
 
 
 def _save_deck(
-    session: Session, user: User, title: str, cards: list[CardDraft], tag_mode: str | None = None
+    session: Session, user: User, title: str, cards: list[CardDraft],
+    tag_mode: str | None = None, tags: list[list[str]] | None = None,
 ) -> Deck:
     deck = Deck(title=title, user_id=user.id)
     flashcards = [
@@ -422,16 +400,16 @@ def _save_deck(
     for flashcard in flashcards:
         preserve_question(flashcard)
 
-    names = [_clean_labels(card.labels, tag_mode) for card in cards]
+    names = tags if tags is not None and len(tags) == len(cards) else [[] for _ in cards]
     if tag_mode == "general":
-        # Broad topics become DECK labels: the most common ones across all cards.
+        # Broad topics become DECK labels: the biggest clusters first.
         known = known_label_colors(session, user.id)
         top = Counter(n for ns in names for n in ns).most_common(_MAX_DECK_LABELS)
         deck.labels = [DeckLabel(name=n, color=known.get(n) or default_color(n)) for n, _ in top]
     elif tag_mode == "specific":
-        # Exact concepts become CARD tags, scoped to this deck.
+        # Cluster concepts become CARD tags, scoped to this deck.
         for flashcard, ns in zip(flashcards, names):
-            flashcard.tags = [CardTag(name=n, color=default_color(n)) for n in ns]
+            flashcard.tags = [CardTag(name=n, color=default_color(n)) for n in ns[:_MAX_ITEMS]]
 
     deck.flashcards.extend(flashcards)
     session.add(deck)

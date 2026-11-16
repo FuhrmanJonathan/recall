@@ -5,7 +5,7 @@ import asyncio
 import base64
 
 from openai import AsyncOpenAI, OpenAIError
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from app import config
 from app.text import split_into_chunks
@@ -26,17 +26,22 @@ material. Do not skip content and do not add facts that are not in the material.
 name or quantity, not a filler word), copied exactly, with the same spelling and case, from the \
 answer text. It is hidden in a fill-in-the-blank quiz, so the question must not already contain it. \
 Use an empty string if the answer has no good term to hide.
-- Leave labels as an empty list unless the instructions about labels say otherwise.
 """
 
-OCR_NOTE = (
-    "This text was produced by OCR from photos of written notes, so it may contain "
-    "recognition mistakes. Fix obvious errors using context. Set needs_review to true on any "
-    "card where you had to correct, guess at, or reconstruct garbled or fragmentary text, or "
-    "where you are not confident the card matches what the student actually wrote, so they "
-    "can check it against their original notes. If a passage is completely unreadable, skip "
-    "it; never invent content."
+IMAGE_NOTE = (
+    "The attached image is a photo or scan of the student's written notes (handwritten or "
+    "printed). Read it carefully, including diagrams, arrows and margin notes. Set "
+    "needs_review to true on any card where the writing was hard to read and you had to "
+    "guess at, or reconstruct, a word, number or symbol, or where you are not confident the "
+    "card matches what the student actually wrote, so they can check it against their "
+    "original notes. If a passage is completely unreadable, skip it; never invent content."
 )
+
+# Image types the model accepts, by the file's first bytes.
+IMAGE_TYPES = {
+    b"\x89PNG": "image/png",
+    b"\xff\xd8\xff": "image/jpeg",
+}
 
 PDF_SCAN_NOTE = (
     "If a page is a scan or handwriting you cannot read confidently, still write the card but "
@@ -51,27 +56,6 @@ FOCUS_NOTE = (
     "more cards, and more detailed ones, for material related to this topic, covering each "
     "of its sub-points. Still cover everything else in the material normally. If the material "
     "does not mention the topic, just make the usual cards."
-)
-
-
-# Optional auto-tagging. "general" gives a few broad subject labels; "specific" gives narrow
-# concept labels. Without a mode the model is told to leave labels empty.
-TAG_NOTES = {
-    "general": (
-        "Also give every card 1-2 broad labels naming its overall subject area or unit, the way "
-        'a textbook chapter or course unit would (for example "cell biology" or "genetics"). '
-        "Reuse the same few labels across the cards you write so related cards share them."
-    ),
-    "specific": (
-        "Also give every card 2-4 narrow labels naming the exact concept, process, structure or "
-        'term it covers (for example "krebs cycle" or "atp yield"). Prefer concrete topic names '
-        "over broad subject names."
-    ),
-}
-TAG_MODES = tuple(TAG_NOTES)
-LABEL_RULES = (
-    "Labels are lowercase topic names of 1-3 words with no commas, in the same language as "
-    "the material."
 )
 
 
@@ -90,12 +74,6 @@ def focus_block(focus: str | None) -> str:
     return f"{FOCUS_NOTE}\n<focus>{cleaned}</focus>\n"
 
 
-def tag_block(tag_mode: str | None) -> str:
-    if tag_mode not in TAG_NOTES:
-        return ""
-    return f"{TAG_NOTES[tag_mode]} {LABEL_RULES}\n"
-
-
 def _drop_defaults(schema: dict) -> None:
     # OpenAI's strict structured output wants every field required, with no defaults.
     for prop in schema.get("properties", {}).values():
@@ -109,7 +87,6 @@ class CardDraft(BaseModel):
     answer: str
     needs_review: bool = False
     cloze_blank: str = ""
-    labels: list[str] = Field(default_factory=list)
 
 
 class CardSet(BaseModel):
@@ -180,14 +157,13 @@ def dedupe_cards(cards: list[CardDraft]) -> list[CardDraft]:
                 answer=answer,
                 needs_review=card.needs_review,
                 cloze_blank=clean_blank(answer, card.cloze_blank),
-                labels=card.labels,
             )
         )
     return unique
 
 
 async def generate_cards_from_pdf(
-    data: bytes, filename: str, *, focus: str | None = None, tag_mode: str | None = None
+    data: bytes, filename: str, *, focus: str | None = None
 ) -> list[CardDraft]:
     """Send the PDF straight to OpenAI (it reads both the text and the page images)."""
     encoded = base64.b64encode(data).decode("ascii")
@@ -198,23 +174,46 @@ async def generate_cards_from_pdf(
             "filename": filename or "notes.pdf",
             "file_data": f"data:application/pdf;base64,{encoded}",
         },
-        {"type": "input_text", "text": instruction + focus_block(focus) + tag_block(tag_mode)},
+        {"type": "input_text", "text": instruction + focus_block(focus)},
     ]
     return dedupe_cards(await _generate(content))
 
 
-async def generate_cards_from_text(
-    text: str, *, from_ocr: bool = False, focus: str | None = None, tag_mode: str | None = None
-) -> list[CardDraft]:
+def image_mime_type(data: bytes) -> str | None:
+    """Return the image's MIME type from its first bytes, or None if it isn't supported."""
+    for magic, mime in IMAGE_TYPES.items():
+        if data.startswith(magic):
+            return mime
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+async def generate_cards_from_image(data: bytes, *, focus: str | None = None) -> list[CardDraft]:
+    """Send a photo of written notes straight to the chat model (it reads the image itself)."""
+    mime = image_mime_type(data)
+    if mime is None:
+        raise ValueError("This file is not a valid PNG, JPG or WEBP image.")
+    encoded = base64.b64encode(data).decode("ascii")
+    content = [
+        {"type": "input_image", "image_url": f"data:{mime};base64,{encoded}", "detail": "high"},
+        {
+            "type": "input_text",
+            "text": "Create flashcards from the attached notes.\n" + IMAGE_NOTE + "\n"
+            + focus_block(focus),
+        },
+    ]
+    return dedupe_cards(await _generate(content))
+
+
+async def generate_cards_from_text(text: str, *, focus: str | None = None) -> list[CardDraft]:
     """Split cleaned text into chunks (text.split_into_chunks) and generate cards for each."""
     chunks = split_into_chunks(text, config.GENERATION_CHUNK_CHARS)
     limiter = asyncio.Semaphore(config.MAX_CONCURRENT_REQUESTS)
-    focus_text = focus_block(focus) + tag_block(tag_mode)
+    focus_text = focus_block(focus)
 
     async def run(index: int, chunk: str) -> list[CardDraft]:
         header = f"Create flashcards from these notes (part {index} of {len(chunks)}).\n"
-        if from_ocr:
-            header += OCR_NOTE + "\n"
         header += focus_text
         async with limiter:
             return await _generate([{"type": "input_text", "text": f"{header}\n{chunk}"}])
