@@ -179,7 +179,7 @@ function Study() {
   const [mode, setMode] = useState<Mode>("due");
   const [selection, setSelection] = useState<StudySelection>(defaultSelection);
   const [decks, setDecks] = useState<{ id: number; title: string; card_count: number }[]>([]);
-  const [labels, setLabels] = useState<string[]>([]);
+  const [labels, setLabels] = useState<LabelInfo[]>([]);
   const [queue, setQueue] = useState<Queue>({ cards: [], total: 0 });
   const quizCards = queue.cards.filter(c => c.quiz_ready);
   const [offset, setOffset] = useState(0);
