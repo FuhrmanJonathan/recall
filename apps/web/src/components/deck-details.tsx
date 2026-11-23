@@ -4,9 +4,19 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { RequireAuth } from "@/components/auth";
 import { Card, btnPrimary, btnSecondary } from "@/components/ui";
+import type { CardImage } from "@/components/card-image";
 
-type Flashcard = { id: number; question: string; answer: string; needs_review: boolean };
+type Flashcard = { id: number; question: string; answer: string; needs_review: boolean; images?: CardImage[] };
 type Deck = { id: number; title: string; flashcards: Flashcard[] };
+
+function Thumbs({ images, side }: { images?: CardImage[]; side: CardImage["side"] }) {
+  const list = (images ?? []).filter((i) => i.side === side);
+  if (!list.length) return null;
+  return <div className="mt-4 flex flex-wrap gap-3">
+    {list.map((i) => /* eslint-disable-next-line @next/next/no-img-element */
+      <img key={i.id} src={`/api/images/${i.id}`} alt="" className="max-h-48 max-w-full rounded-lg border border-gray-200 object-contain" />)}
+  </div>;
+}
 
 function Details({ deckId }: { deckId: string }) {
   const [deck, setDeck] = useState<Deck | null>(null);
@@ -220,8 +230,8 @@ function Details({ deckId }: { deckId: string }) {
       {cards.map((card) => <article key={card.id} className="rounded-2xl border border-gray-200 bg-white p-5 sm:p-7">
         <div className="mb-5 flex items-center justify-between gap-3"><span className="text-sm font-semibold text-gray-600">Card {String(card.index + 1).padStart(2, "0")}</span>{card.needs_review && <span className="rounded-full bg-amber-50 px-3 py-1 text-sm font-medium text-amber-900">Needs checking</span>}</div>
         <div className="grid gap-6 md:grid-cols-2 md:gap-10">
-          <div><p className="mb-2 text-sm font-semibold text-accent">Question</p><h3 className="whitespace-pre-wrap break-words text-lg font-semibold leading-8">{card.question}</h3></div>
-          <div className="border-t border-gray-100 pt-5 md:border-l md:border-t-0 md:pl-8 md:pt-0"><p className="mb-2 text-sm font-semibold text-gray-600">Answer</p><p className="whitespace-pre-wrap break-words text-base leading-8 text-gray-700">{card.answer}</p></div>
+          <div><p className="mb-2 text-sm font-semibold text-accent">Question</p><h3 className="whitespace-pre-wrap break-words text-lg font-semibold leading-8">{card.question}</h3><Thumbs images={card.images} side="question" /></div>
+          <div className="border-t border-gray-100 pt-5 md:border-l md:border-t-0 md:pl-8 md:pt-0"><p className="mb-2 text-sm font-semibold text-gray-600">Answer</p><p className="whitespace-pre-wrap break-words text-base leading-8 text-gray-700">{card.answer}</p><Thumbs images={card.images} side="answer" /></div>
         </div>
         <div className="mt-5 border-t border-gray-100 pt-4"><Link aria-label={`Edit card ${card.index + 1}`} href={`/decks/${deck.id}/edit?card=${card.id}`} className="inline-flex items-center gap-2 text-sm font-semibold text-accent hover:underline">Edit card <span aria-hidden="true">↗</span></Link></div>
       </article>)}

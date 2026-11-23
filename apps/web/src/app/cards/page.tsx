@@ -9,8 +9,9 @@ import { RequireAuth, useAuth } from "@/components/auth";
 import { Card, btnPrimary, btnSecondary } from "@/components/ui";
 import StudyFocus from "@/components/study-focus";
 import { defaultSelection, readSelection, selectionFromUrl, selectionParams, shuffled, type StudySelection } from "@/lib/study-selection";
+import type { CardImage } from "@/components/card-image";
 
-type CardData = { id: number; deck_id: number; deck_title: string; question: string; answer: string; quiz_ready: boolean; labels: string[]; due_at: string | null; status: "new" | "due" | "upcoming" };
+type CardData = { id: number; deck_id: number; deck_title: string; question: string; answer: string; quiz_ready: boolean; labels: string[]; due_at: string | null; status: "new" | "due" | "upcoming"; images?: CardImage[] };
 type Queue = { cards: CardData[]; total: number };
 type Mode = "due" | "practice" | "difficult";
 type Rating = "Again" | "Hard" | "Good" | "Easy";
@@ -216,11 +217,11 @@ function Study() {
             if (res.status === 404) return null;
             return check(res);
           })));
-          const freshCards = new Map<number, { question: string; answer: string; title: string }>();
-          for (const deck of decks) if (deck) for (const card of deck.flashcards) freshCards.set(card.id, { question: card.question, answer: card.answer, title: deck.title });
+          const freshCards = new Map<number, { question: string; answer: string; title: string; images: CardImage[] }>();
+          for (const deck of decks) if (deck) for (const card of deck.flashcards) freshCards.set(card.id, { question: card.question, answer: card.answer, title: deck.title, images: card.images ?? [] });
           const restored = remaining.filter((card) => freshCards.has(card.id)).map((card) => {
             const fresh = freshCards.get(card.id)!;
-            return { ...card, question: fresh.question, answer: fresh.answer, deck_title: fresh.title };
+            return { ...card, question: fresh.question, answer: fresh.answer, deck_title: fresh.title, images: fresh.images };
           });
           if (controller.signal.aborted) return;
           setMode(saved.mode); setSelection(readSelection(saved.selection ?? { deckIds: saved.deckId ? [saved.deckId] : [], tags: saved.label ? [saved.label] : [] })); setOffset(saved.offset);
@@ -316,6 +317,7 @@ function Study() {
   if (!ready) return <section className="mx-auto max-w-3xl"><h1 className="text-3xl font-semibold">Study</h1><p role="status" className="mt-6 text-gray-600">Opening your study session…</p></section>;
   if (session) {
     const card = session[index];
+    const sideImages = (card?.images ?? []).filter((i) => i.side === (flipped ? "answer" : "question"));
     return <section className="mx-auto max-w-2xl">
       <div className="flex items-center justify-between gap-4">
         <button disabled={saving} onClick={back} className={btnSecondary + disabled}>← Back to cards</button>
@@ -326,7 +328,15 @@ function Study() {
         <Link href={`/decks/${card.deck_id}`} className="mt-3 inline-block text-sm text-gray-600 hover:text-accent">{card.deck_title} ↗</Link>
         <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-gray-200"><div className="h-full bg-accent" style={{ width: `${index / session.length * 100}%` }} /></div>
         <button ref={cardRef} aria-describedby="study-card-content" aria-label={flipped ? "Answer. Flip to question" : "Question. Flip to answer"} disabled={saving} onClick={() => setFlipped(!flipped)} className="mt-6 block w-full rounded-2xl text-left">
-          <Card className="flex min-h-72 flex-col justify-between p-7 sm:p-10"><span className="flex w-full items-center justify-between gap-3"><span className="text-sm font-semibold text-gray-600">{flipped ? "Answer" : "Question"}</span><Yogo expression={flipped ? "encouraging" : "thinking"} size={48} /></span><p id="study-card-content" className="my-9 whitespace-pre-wrap break-words text-center text-2xl leading-relaxed">{flipped ? card.answer : card.question}</p><span className="text-center text-sm text-accent">{flipped ? "Show question ↻" : "Show answer ↻"}</span></Card>
+          <Card className="flex min-h-72 flex-col justify-between p-7 sm:p-10"><span className="flex w-full items-center justify-between gap-3"><span className="text-sm font-semibold text-gray-600">{flipped ? "Answer" : "Question"}</span><Yogo expression={flipped ? "encouraging" : "thinking"} size={48} /></span>
+            <span className="flex w-full flex-col items-center">
+              <p id="study-card-content" className="my-9 whitespace-pre-wrap break-words text-center text-2xl leading-relaxed">{flipped ? card.answer : card.question}</p>
+              {sideImages.length > 0 && <span className="mb-6 flex flex-wrap justify-center gap-3">
+                {sideImages.map((i) => /* eslint-disable-next-line @next/next/no-img-element */
+                  <img key={i.id} src={`/api/images/${i.id}`} alt="" className="max-h-56 max-w-full rounded-lg border border-gray-200 object-contain" />)}
+              </span>}
+            </span>
+            <span className="text-center text-sm text-accent">{flipped ? "Show question ↻" : "Show answer ↻"}</span></Card>
         </button>
         {!flipped ? <button disabled={saving} onClick={() => setFlipped(true)} className={`mt-5 w-full ${btnPrimary}`}>Show answer</button> : mode !== "due" ? <button className={`mt-5 w-full ${btnPrimary}`} onClick={() => { setFlipped(false); setIndex((value) => value + 1); }}>Next card →</button> : <div className="mt-6">
           <div className="grid grid-cols-4 gap-2">{ratings.map((rating, i) => <button key={rating} disabled={saving || conflict} aria-keyshortcuts={String(i + 1)} title={`${rating} (press ${i + 1})`} onClick={() => void rate(rating)} className="flex flex-col items-center gap-1.5 rounded-xl border border-gray-300 bg-white px-2 py-3 text-center text-sm font-semibold transition-colors hover:border-accent hover:bg-blue-50 focus-visible:border-accent disabled:cursor-not-allowed disabled:opacity-50 sm:text-base"><kbd aria-hidden="true" className="inline-flex h-6 min-w-6 items-center justify-center rounded-md border border-gray-200 bg-gray-50 px-1 font-sans text-xs text-gray-600">{i + 1}</kbd><span>{rating}</span></button>)}</div>
