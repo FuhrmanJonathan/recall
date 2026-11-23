@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app import reviews
 from app.deps import get_current_user, get_session
 from app.quiz_questions import question_data
-from recall_db.models import COLORS, CardLabel, CardReviewState, Deck, Flashcard, Review, User
+from recall_db.models import COLORS, CardImage, CardLabel, CardReviewState, Deck, Flashcard, Review, User  # NEW: CardImage
 
 router = APIRouter(prefix="/api", tags=["study"])
 
@@ -56,6 +56,12 @@ class LabelsIn(BaseModel):
         return [result[name] for name in sorted(result)]
 
 
+class StudyImage(BaseModel):
+    """Image metadata only. The bytes are served by GET /api/images/{id}."""
+    id: int
+    side: str
+
+
 class StudyCard(BaseModel):
     id: int
     deck_id: int
@@ -64,6 +70,7 @@ class StudyCard(BaseModel):
     answer: str
     quiz_ready: bool
     labels: list[str]
+    images: list[StudyImage] = []
     due_at: datetime | None
     status: Literal["new", "due", "upcoming"]
 
@@ -185,12 +192,21 @@ def study_cards(
         for card_id, name in session.execute(select(CardLabel.flashcard_id, CardLabel.name)
                 .where(CardLabel.flashcard_id.in_(ids)).order_by(CardLabel.name)):
             labels_by_card[card_id].append(name)
+    # image ids and sides for these cards, load bytes
+    images_by_card: dict[int, list[StudyImage]] = {card_id: [] for card_id in ids}
+    if ids:
+        for image_id, card_id, side in session.execute(
+            select(CardImage.id, CardImage.flashcard_id, CardImage.side)
+            .where(CardImage.flashcard_id.in_(ids)).order_by(CardImage.id)
+        ):
+            images_by_card[card_id].append(StudyImage(id=image_id, side=side))
     cards = []
     for card, title, state in rows:
         due = reviews._stored_utc(state.due_at) if state else None
         cards.append(StudyCard(
             id=card.id, deck_id=card.deck_id, deck_title=title,
             question=card.question, answer=card.answer, labels=labels_by_card[card.id],
+            images=images_by_card[card.id],
             quiz_ready=question_data(card) is not None,
             due_at=due, status="new" if due is None else "due" if due <= now else "upcoming",
         ))
