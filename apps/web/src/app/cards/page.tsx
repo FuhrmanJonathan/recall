@@ -12,7 +12,7 @@ import { defaultSelection, readSelection, selectionFromUrl, selectionParams, shu
 
 type CardData = { id: number; deck_id: number; deck_title: string; question: string; answer: string; quiz_ready: boolean; labels: string[]; due_at: string | null; status: "new" | "due" | "upcoming" };
 type Queue = { cards: CardData[]; total: number };
-type Mode = "due" | "practice";
+type Mode = "due" | "practice" | "difficult";
 type Rating = "Again" | "Hard" | "Good" | "Easy";
 const ratings: Rating[] = ["Again", "Hard", "Good", "Easy"];
 const inputStyle = "rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm";
@@ -204,7 +204,8 @@ function Study() {
       let remembered = defaultSelection;
       try { remembered = readSelection(JSON.parse(localStorage.getItem(selectionKey) ?? "null")); } catch { /* Preferences are optional when storage is unavailable. */ }
       setSelection(selectionFromUrl(params, remembered));
-      setMode(params.get("mode") === "practice" ? "practice" : "due");
+      const requestedMode = params.get("mode");
+      setMode(requestedMode === "practice" || requestedMode === "difficult" ? requestedMode : "due");
       if (params.get("resume") === "1") {
         try {
           const saved: StudySnapshot | null = JSON.parse(sessionStorage.getItem(sessionKey) ?? "null");
@@ -247,7 +248,7 @@ function Study() {
   useEffect(() => {
     if (!ready || session) return;
     const params = selectionParams(selection);
-    if (mode === "practice") params.set("mode", mode);
+    if (mode !== "due") params.set("mode", mode);
     window.history.replaceState(window.history.state, "", `/cards${params.size ? `?${params}` : ""}`);
     try { localStorage.setItem(selectionKey, JSON.stringify(selection)); } catch { /* The current selection still works without browser storage. */ }
   }, [ready, session, mode, selection, selectionKey]);
@@ -327,7 +328,7 @@ function Study() {
         <button ref={cardRef} aria-describedby="study-card-content" aria-label={flipped ? "Answer. Flip to question" : "Question. Flip to answer"} disabled={saving} onClick={() => setFlipped(!flipped)} className="mt-6 block w-full rounded-2xl text-left">
           <Card className="flex min-h-72 flex-col justify-between p-7 sm:p-10"><span className="flex w-full items-center justify-between gap-3"><span className="text-sm font-semibold text-gray-600">{flipped ? "Answer" : "Question"}</span><Yogo expression={flipped ? "encouraging" : "thinking"} size={48} /></span><p id="study-card-content" className="my-9 whitespace-pre-wrap break-words text-center text-2xl leading-relaxed">{flipped ? card.answer : card.question}</p><span className="text-center text-sm text-accent">{flipped ? "Show question ↻" : "Show answer ↻"}</span></Card>
         </button>
-        {!flipped ? <button disabled={saving} onClick={() => setFlipped(true)} className={`mt-5 w-full ${btnPrimary}`}>Show answer</button> : mode === "practice" ? <button className={`mt-5 w-full ${btnPrimary}`} onClick={() => { setFlipped(false); setIndex((value) => value + 1); }}>Next card →</button> : <div className="mt-6">
+        {!flipped ? <button disabled={saving} onClick={() => setFlipped(true)} className={`mt-5 w-full ${btnPrimary}`}>Show answer</button> : mode !== "due" ? <button className={`mt-5 w-full ${btnPrimary}`} onClick={() => { setFlipped(false); setIndex((value) => value + 1); }}>Next card →</button> : <div className="mt-6">
           <div className="grid grid-cols-4 gap-2">{ratings.map((rating, i) => <button key={rating} disabled={saving || conflict} aria-keyshortcuts={String(i + 1)} title={`${rating} (press ${i + 1})`} onClick={() => void rate(rating)} className="flex flex-col items-center gap-1.5 rounded-xl border border-gray-300 bg-white px-2 py-3 text-center text-sm font-semibold transition-colors hover:border-accent hover:bg-blue-50 focus-visible:border-accent disabled:cursor-not-allowed disabled:opacity-50 sm:text-base"><kbd aria-hidden="true" className="inline-flex h-6 min-w-6 items-center justify-center rounded-md border border-gray-200 bg-gray-50 px-1 font-sans text-xs text-gray-600">{i + 1}</kbd><span>{rating}</span></button>)}</div>
           <p className="mt-3 text-center text-xs text-gray-500">Press 1–4 to rate this card.</p>
         </div>}
@@ -341,6 +342,7 @@ function Study() {
     <div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Study</h1><Link href="/quiz/history" className={btnSecondary}>Quiz history &amp; mistakes</Link></div>
     {resumeError && <div role="alert" className="mt-5 rounded-xl bg-amber-50 p-4 text-amber-900"><p>{resumeError}</p><button onClick={() => { window.history.replaceState(window.history.state, "", "/cards?resume=1"); setResumeRevision((value) => value + 1); }} className={`mt-3 ${btnSecondary}`}>Retry returning to study</button></div>}
     <div className="mt-7 grid gap-3 sm:grid-cols-2" role="group" aria-label="Study mode">
+      <button aria-pressed={mode === "difficult"} onClick={() => filter(() => setMode("difficult"))} className={`rounded-xl border p-5 text-left ${mode === "difficult" ? "border-accent bg-blue-50 ring-1 ring-accent" : "border-gray-300 bg-white hover:border-accent"}`}><span className="block text-base font-semibold">Practice difficult cards</span><span className="mt-2 block text-sm text-gray-600">Cards rated Again or Hard at least twice in the past 30 days. Practice leaves your review schedule unchanged.</span></button>
       <button aria-pressed={mode === "due"} onClick={() => filter(() => setMode("due"))} className={`rounded-xl border p-5 text-left ${mode === "due" ? "border-accent bg-blue-50 ring-1 ring-accent" : "border-gray-300 bg-white hover:border-accent"}`}><span className="flex items-center justify-between text-base font-semibold">Review due cards<span aria-hidden="true">{mode === "due" ? "●" : "○"}</span></span><span className="mt-2 block text-sm text-gray-600">New cards and cards due now. Ratings update your review schedule.</span></button>
       <button aria-pressed={mode === "practice"} onClick={() => filter(() => setMode("practice"))} className={`rounded-xl border p-5 text-left ${mode === "practice" ? "border-accent bg-blue-50 ring-1 ring-accent" : "border-gray-300 bg-white hover:border-accent"}`}><span className="flex items-center justify-between text-base font-semibold">Practice all cards<span aria-hidden="true">{mode === "practice" ? "●" : "○"}</span></span><span className="mt-2 block text-sm text-gray-600">Include cards that aren’t due. Your review schedule stays the same.</span></button>
     </div>

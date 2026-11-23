@@ -223,6 +223,9 @@ class CardLabel(Base):
         ForeignKey("flashcards.id", ondelete="CASCADE"), primary_key=True
     )
     name: Mapped[str] = mapped_column(String(40), primary_key=True, index=True)
+    color: Mapped[str] = mapped_column(String(20), default="blue", server_default="blue")
+
+
 COLORS = ("gray", "red", "orange", "yellow", "green", "teal", "blue", "purple", "pink")
 class DeckLabel(Base):
     """Topic label on a whole deck. Same name = same color across a user's decks."""

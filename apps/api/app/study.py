@@ -1,6 +1,6 @@
 """Read-only study queues and user-owned card labels. Practice never changes reviews."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Literal
 import unicodedata
 
@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app import reviews
 from app.deps import get_current_user, get_session
 from app.quiz_questions import question_data
-from recall_db.models import COLORS, CardLabel, CardReviewState, Deck, Flashcard, User
+from recall_db.models import COLORS, CardLabel, CardReviewState, Deck, Flashcard, Review, User
 
 router = APIRouter(prefix="/api", tags=["study"])
 
@@ -122,7 +122,7 @@ def set_labels(
 @router.get("/study/cards", response_model=StudyQueue)
 def study_cards(
     response: Response,
-    mode: Literal["due", "practice"] = "due",
+    mode: Literal["due", "practice", "difficult"] = "due",
     deck_id: int | None = Query(default=None, gt=0),
     label: str | None = Query(default=None, max_length=100),
     deck_ids: list[int] | None = Query(default=None, max_length=50),
@@ -163,6 +163,13 @@ def study_cards(
         statement = statement.where(or_(
             CardReviewState.due_at.is_(None), CardReviewState.due_at <= now
         ))
+    if mode == "difficult":
+        difficult_cards = select(Review.flashcard_id).where(
+            Review.user_id == user.id,
+            Review.created_at >= now - timedelta(days=30),
+            Review.rating.in_(("Again", "Hard")),
+        ).group_by(Review.flashcard_id).having(func.count() >= 2)
+        statement = statement.where(Flashcard.id.in_(difficult_cards))
     total = session.scalar(select(func.count()).select_from(statement.subquery()))
     # Oldest due first, then new cards, then future cards in practice mode.
     priority = case(

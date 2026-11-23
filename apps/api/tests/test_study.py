@@ -41,6 +41,26 @@ def populate(engine, owner, other):
         return [card.id for card in cards], deck.id, outsider.id, foreign.id
 
 
+def test_difficult_queue_requires_two_recent_ratings_from_this_user(setup):
+    client, engine, (owner, other, _) = setup
+    (overdue, boundary, future), _, outsider, _ = populate(engine, owner, other)
+    with Session(engine) as session:
+        for user, card, rating, age in [
+            (owner, future, "Again", 1), (owner, future, "Hard", 2),
+            (owner, overdue, "Hard", 1), (owner, overdue, "Again", 31),
+            (owner, boundary, "Hard", 1), (other, boundary, "Again", 2),
+            (owner, outsider, "Hard", 1), (owner, outsider, "Again", 2),
+        ]:
+            session.add(Review(user_id=user, flashcard_id=card, rating=rating,
+                               created_at=START - timedelta(days=age)))
+        session.commit()
+    response = get(client, "?mode=difficult")
+    assert response.status_code == 200, response.text
+    assert [card["id"] for card in response.json()["cards"]] == [future]
+    with Session(engine) as session:
+        assert session.get(CardReviewState, (owner, future)).version == 1
+
+
 def test_due_boundary_order_and_practice_are_read_only(setup):
     client, engine, (owner, other, new_card) = setup
     (overdue, boundary, future), _, _, _ = populate(engine, owner, other)

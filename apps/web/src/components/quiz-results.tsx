@@ -6,6 +6,41 @@ import { useState } from "react";
 import { Card, btnPrimary, btnSecondary } from "@/components/ui";
 import type { QuizRun } from "@/lib/quiz-session";
 
+function OriginalCard({ cardId }: { cardId: number }) {
+  const [card, setCard] = useState<{ card_question: string; card_answer: string } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  async function open() {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/quiz/cards/${cardId}/question`, { cache: "no-store" });
+      if (response.status === 404) {
+        setError("The original card is no longer available.");
+      } else if (!response.ok) {
+        setError("Could not load the original card. Try again.");
+      } else {
+        setCard(await response.json());
+      }
+    } catch {
+      setError("Could not load the original card. Try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+  return <div className="mt-4">
+    <button type="button" aria-expanded={!!card} disabled={loading} className={btnSecondary}
+      onClick={() => card ? setCard(null) : void open()}>
+      {loading ? "Loading flashcard…" : card ? "Hide flashcard" : "View flashcard"}
+    </button>
+    {error && <p role="status" className="mt-2 text-sm text-gray-600">{error}</p>}
+    {card && <div className="mt-3 rounded-lg bg-gray-50 p-4 whitespace-pre-wrap break-words">
+      <p className="font-semibold">{card.card_question}</p>
+      <p className="mt-2">{card.card_answer}</p>
+    </div>}
+  </div>;
+}
+
 export default function QuizResults({ run }: { run: QuizRun }) {
   const router = useRouter();
   const [missedOnly, setMissedOnly] = useState(false);
@@ -39,6 +74,7 @@ export default function QuizResults({ run }: { run: QuizRun }) {
         <p className="mt-2 whitespace-pre-wrap break-words">{q.before}<strong>________</strong>{q.after}</p>
         <p className="mt-4 whitespace-pre-wrap break-words">Your answer: {a.text.trim() || "No answer"}</p>
         <p className="mt-2 whitespace-pre-wrap break-words">Correct answer: <strong>{q.answer}</strong></p>
+        {a.result !== "correct" && <OriginalCard cardId={q.source_card_id} />}
       </Card>;
     })}</div>
     {missedOnly && missed === 0 && <p className="mt-4">Nothing to review here.</p>}
