@@ -7,6 +7,7 @@ import { canLeavePage } from "@/components/use-leave-guard";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth";
 import { Wordmark } from "@/components/ui";
+import ThemeToggle from "@/components/theme-toggle";
 
 const appLinks = [
   { href: "/dashboard", label: "Dashboard" },
@@ -77,6 +78,7 @@ export default function Navbar() {
 
         {!loading && (
           <nav className={`flex flex-wrap items-center gap-1 text-sm sm:gap-2 sm:text-base ${user ? "w-full sm:w-auto" : ""}`}>
+            <ThemeToggle />
             {user ? (
               <>
                 {appLinks.map((link) => (

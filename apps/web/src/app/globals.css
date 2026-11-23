@@ -8,6 +8,66 @@
   --color-gray-700: #344158;
   --color-accent: #3159d6;
   --color-accent-dark: #2447b4;
+  --color-hero: #e9effd;
+  --color-hero-stack: #dbe6fc;
+  --color-feature: #edf2ff;
+}
+
+:root {
+  color-scheme: light;
+  --page-background: #f7f8fa;
+  --surface: #fff;
+  --placeholder: #657187;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page-background: #17191e;
+  --surface: #21242b;
+  --color-accent: #a6b8f5;
+  --placeholder: #989da9;
+  --color-ink: #e8e9ee;
+  --color-gray-50: #1c1f25;
+  --color-gray-100: #2b2f38;
+  --color-gray-200: #393e49;
+  --color-gray-300: #585f6e;
+  --color-gray-400: #989da9;
+  --color-gray-500: #acb1bd;
+  --color-gray-600: #c0c4ce;
+  --color-gray-700: #d5d8e0;
+  --color-gray-900: #e8e9ee;
+  --color-blue-50: #282e42;
+  --color-blue-100: #353e58;
+  --color-blue-200: #495675;
+  --color-red-50: #361e29;
+  --color-red-200: #713347;
+  --color-red-600: #ff929d;
+  --color-red-700: #ffadb5;
+  --color-red-800: #ffc4ca;
+  --color-amber-50: #33291b;
+  --color-amber-100: #41331e;
+  --color-amber-200: #70562b;
+  --color-amber-800: #f4ca80;
+  --color-amber-900: #f7d89f;
+  --color-amber-950: #ffe7bb;
+  --color-green-50: #162e27;
+  --color-green-200: #315e4b;
+  --color-green-700: #8edcb0;
+  --color-green-800: #a4e6c1;
+  --color-emerald-50: #162e27;
+  --color-emerald-700: #8edcb0;
+  --color-emerald-900: #a4e6c1;
+  --color-hero: #282e42;
+  --color-hero-stack: #353e58;
+  --color-feature: #262b3a;
+}
+
+/* Reuse existing surface and text utilities without changing every screen.
+   White text and solid button backgrounds keep their original contrast. */
+@layer utilities {
+  .bg-white { background-color: var(--surface); }
+  .bg-accent { background-color: #3159d6; }
+  .bg-gray-900 { background-color: #111827; }
 }
 
 body {
@@ -15,10 +75,10 @@ body {
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
 }
 
-body { background-color: #f7f8fa; line-height: 1.6; }
+body { background-color: var(--page-background); line-height: 1.6; }
 input, textarea, select { line-height: 1.6; }
 textarea { font-size: 1.125rem; }
-input::placeholder, textarea::placeholder { color: #657187; opacity: 1; }
+input::placeholder, textarea::placeholder { color: var(--placeholder); opacity: 1; }
 button:not(:disabled), a, select, input[type="checkbox"] { cursor: pointer; }
 :where(a, button, input, textarea, select):focus-visible {
   outline: 3px solid #93b4ff;

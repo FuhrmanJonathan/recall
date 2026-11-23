@@ -138,7 +138,7 @@ function Details({ deckId }: { deckId: string }) {
   );
   return <section>
     <Link href="/decks" className="text-sm font-medium text-gray-600 hover:text-accent">← All decks</Link>
-    <div className="mt-6 rounded-2xl border border-blue-100 bg-[#edf2ff] p-6 sm:p-9">
+    <div className="mt-6 rounded-2xl border border-blue-100 bg-feature p-6 sm:p-9">
       <div className="flex flex-wrap items-start justify-between gap-6">
         <div className="min-w-0 max-w-2xl"><h1 className="mt-3 break-words text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">{deck.title}</h1><p className="mt-4 text-base text-gray-700">{deck.flashcards.length} flashcards {flagged > 0 && <><span className="mx-2 text-gray-500">·</span>{flagged} need checking</>}</p></div>
         <div className="flex flex-wrap gap-3"><a href={`/api/csv/decks/${deck.id}/export`} className={btnSecondary}>Export CSV</a><Link href={`/decks/${deck.id}/edit`} className={btnSecondary}>Edit deck</Link>{deck.flashcards.length > 0 && <Link href={`/cards?deck=${deck.id}`} className={btnPrimary}>Study this deck →</Link>}</div>
