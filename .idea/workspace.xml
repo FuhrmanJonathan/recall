@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="04f46abd-75f6-4e66-b64a-4371ec91c6f5" name="Changes" comment="Add flashcard gen pipline --Brady" />
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_BRANCH_BY_REPOSITORY">
+      <map>
+        <entry key="$PROJECT_DIR$" value="frontend-cards" />
+      </map>
+    </option>
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="GitHubPullRequestSearchHistory">{
+  &quot;lastFilter&quot;: {
+    &quot;state&quot;: &quot;OPEN&quot;,
+    &quot;assignee&quot;: &quot;bradywestergren&quot;
+  }
+}</component>
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;https://github.com/FuhrmanJonathan/recall.git&quot;,
+    &quot;accountId&quot;: &quot;ef6b650f-c732-4fa3-ace1-567dd9523703&quot;
+  }
+}</component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 4
+}</component>
+  <component name="ProjectId" id="3KcKLTpwOcHEf48RUTHRsJf9pqZ" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
+    "ai.playground.ignore.import.keys.banner.in.settings": "true",
+    "git-widget-placeholder": "feature/hdbscan-tags",
+    "last_opened_file_path": "/Users/bradywestergren/PycharmProjects/recall/apps/api/tests",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_interpreter_path": "/Users/bradywestergren/Library/Application Support/JetBrains/PyCharm2025.3/node/versions/24.22.0/bin/node",
+    "nodejs_package_manager_path": "npm",
+    "ts.external.directory.path": "/Users/bradywestergren/PycharmProjects/recall/node_modules/typescript/lib",
+    "vue.rearranger.settings.migration": "true"
+  }
+}]]></component>
+  <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/apps/api/tests" />
+      <recent name="$PROJECT_DIR$/apps/api/app" />
+    </key>
+  </component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-js-predefined-d6986cc7102b-9b0f141eb926-JavaScript-PY-253.29346.308" />
+        <option value="bundled-python-sdk-ca5e2b39c7df-6e1f45a539f7-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-253.29346.308" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="04f46abd-75f6-4e66-b64a-4371ec91c6f5" name="Changes" comment="" />
+      <created>1791851359996</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1791851359996</updated>
+      <workItem from="1791851361006" duration="4465000" />
+      <workItem from="1791997405572" duration="2605000" />
+      <workItem from="1792442295457" duration="1280000" />
+      <workItem from="1792465909612" duration="50000" />
+      <workItem from="1792465962131" duration="671000" />
+      <workItem from="1792889883536" duration="4000" />
+      <workItem from="1792889902508" duration="690000" />
+      <workItem from="1792896434799" duration="2011000" />
+      <workItem from="1793027798261" duration="4376000" />
+      <workItem from="1793047604750" duration="97000" />
+      <workItem from="1793047705185" duration="1010000" />
+      <workItem from="1793048888686" duration="4752000" />
+      <workItem from="1793654340354" duration="1556000" />
+      <workItem from="1794866509570" duration="3534000" />
+    </task>
+    <task id="LOCAL-00001" summary="Add flashcard gen pipline --Brady">
+      <option name="closed" value="true" />
+      <created>1791855769537</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1791855769537</updated>
+    </task>
+    <option name="localTasksCounter" value="2" />
+    <servers />
+  </component>
+  <component name="TypeScriptGeneratedFilesManager">
+    <option name="version" value="3" />
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="Add flashcard gen pipline --Brady" />
+    <option name="LAST_COMMIT_MESSAGE" value="Add flashcard gen pipline --Brady" />
+  </component>
+</project>
