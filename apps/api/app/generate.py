@@ -30,10 +30,11 @@ from app.flashcards import (
     generate_cards_from_image,
     generate_cards_from_pdf,
     generate_cards_from_text,
+    image_mime_type,
     normalize_focus,
 )
 from app.text import clean_text
-from recall_db.models import COLORS, CardTag, Deck, DeckLabel, Flashcard, User
+from recall_db.models import COLORS, CardTag, Deck, DeckLabel, DeckSource, Flashcard, User
 
 router = APIRouter(prefix="/api")
 
@@ -195,7 +196,8 @@ async def generate_flashcards(
         )
 
     try:
-        cards = await _make_cards(kind, filename, data, normalize_focus(focus))
+        text = await _notes_text(kind, data)
+        cards = await _make_cards(kind, filename, data, normalize_focus(focus), text=text)
     except GenerationError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
     except ValueError as exc:
@@ -208,7 +210,10 @@ async def generate_flashcards(
     tags = await auto_tag(cards, mode) if mode else None
 
     deck_title = (title or PurePath(filename).stem or "Untitled deck").strip()[:200]
-    deck = await run_in_threadpool(_save_deck, session, user, deck_title, cards, mode, tags)
+    source = _deck_source(kind, filename, data, text)
+    deck = await run_in_threadpool(
+        _save_deck, session, user, deck_title, cards, mode, tags, source
+    )
     return GeneratedDeckOut(**_deck_out(deck).model_dump(), source=kind.value)
 
 
@@ -359,8 +364,26 @@ def _drop_stale_blank(card: Flashcard) -> None:
         card.cloze_blank = None
 
 
+async def _notes_text(kind: SourceKind, data: bytes) -> str | None:
+    """Cleaned text of .txt/.md/.docx notes; None for PDFs and photos (OpenAI reads those)."""
+    if kind is SourceKind.TEXT:
+        raw = decode_text(data)
+    elif kind is SourceKind.DOCX:
+        raw = await run_in_threadpool(extract_docx_text, data)
+    else:
+        return None
+
+    text = clean_text(raw)  # same cleanup the /api/text endpoints use
+    if not text:
+        raise ValueError("Text is empty.")
+    if len(text) > config.MAX_TEXT_CHARS:
+        raise ValueError(f"Text is too long (max {config.MAX_TEXT_CHARS} characters).")
+    return text
+
+
 async def _make_cards(
-    kind: SourceKind, filename: str, data: bytes, focus: str | None = None
+    kind: SourceKind, filename: str, data: bytes, focus: str | None = None,
+    *, text: str | None = None,
 ) -> list[CardDraft]:
     # PDFs and photos of written notes go straight to OpenAI, which reads them itself.
     if kind is SourceKind.PDF:
@@ -371,29 +394,36 @@ async def _make_cards(
         return await generate_cards_from_image(data, focus=focus)
 
     # Other readable documents -> plain text -> OpenAI.
-    if kind is SourceKind.TEXT:
-        raw = decode_text(data)
-    else:
-        raw = await run_in_threadpool(extract_docx_text, data)
-
-    text = clean_text(raw)  # same cleanup the /api/text endpoints use
-    if not text:
-        raise ValueError("Text is empty.")
-    if len(text) > config.MAX_TEXT_CHARS:
-        raise ValueError(f"Text is too long (max {config.MAX_TEXT_CHARS} characters).")
-
+    if text is None:
+        text = await _notes_text(kind, data)
     return await generate_cards_from_text(text, focus=focus)
+
+
+def _deck_source(kind: SourceKind, filename: str, data: bytes, text: str | None) -> DeckSource:
+    """What to keep of the upload so each card can point back into the notes."""
+    source = DeckSource(kind=kind.value, filename=PurePath(filename).name[:255])
+    if text is not None:
+        source.text = text
+    elif kind is SourceKind.PDF:
+        source.content_type, source.data = "application/pdf", data
+    elif kind is SourceKind.IMAGE:
+        source.content_type, source.data = image_mime_type(data), data
+    return source
 
 
 def _save_deck(
     session: Session, user: User, title: str, cards: list[CardDraft],
     tag_mode: str | None = None, tags: list[list[str]] | None = None,
+    source: DeckSource | None = None,
 ) -> Deck:
     deck = Deck(title=title, user_id=user.id)
+    if source is not None:
+        deck.source = source
     flashcards = [
         Flashcard(
             question=card.question, answer=card.answer,
             needs_review=card.needs_review, cloze_blank=card.cloze_blank or None,
+            source_excerpt=card.source_quote or None, source_page=card.source_page or None,
         )
         for card in cards
     ]

@@ -26,6 +26,11 @@ material. Do not skip content and do not add facts that are not in the material.
 name or quantity, not a filler word), copied exactly, with the same spelling and case, from the \
 answer text. It is hidden in a fill-in-the-blank quiz, so the question must not already contain it. \
 Use an empty string if the answer has no good term to hide.
+- Set source_quote to the passage of the material the card is based on, copied word for word \
+(same spelling, punctuation and case; no "..." and no paraphrasing). Keep it short: the one or \
+two sentences (at most about 300 characters) a student would reread to learn the card. For a \
+photo or scan, transcribe the passage as written. Use an empty string only if no single passage fits.
+- Set source_page to the 1-based page number of source_quote in a PDF, or 0 for other material.
 """
 
 IMAGE_NOTE = (
@@ -87,6 +92,9 @@ class CardDraft(BaseModel):
     answer: str
     needs_review: bool = False
     cloze_blank: str = ""
+    # Where in the notes the card came from (see INSTRUCTIONS); shown when a card is missed.
+    source_quote: str = ""
+    source_page: int = 0
 
 
 class CardSet(BaseModel):
@@ -141,6 +149,15 @@ def clean_blank(answer: str, blank: str | None) -> str:
     return blank
 
 
+MAX_QUOTE_CHARS = 1_000
+
+
+def clean_quote(quote: str | None) -> str:
+    """Collapse whitespace in a source quote and cap its length."""
+    cleaned = " ".join((quote or "").split())
+    return cleaned[:MAX_QUOTE_CHARS]
+
+
 def dedupe_cards(cards: list[CardDraft]) -> list[CardDraft]:
     """Drop empty cards and cards whose question repeats an earlier one."""
     seen: set[str] = set()
@@ -157,6 +174,8 @@ def dedupe_cards(cards: list[CardDraft]) -> list[CardDraft]:
                 answer=answer,
                 needs_review=card.needs_review,
                 cloze_blank=clean_blank(answer, card.cloze_blank),
+                source_quote=clean_quote(card.source_quote),
+                source_page=max(card.source_page, 0),
             )
         )
     return unique

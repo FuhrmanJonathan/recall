@@ -10,6 +10,7 @@ import { Card, btnPrimary, btnSecondary } from "@/components/ui";
 import StudyFocus from "@/components/study-focus";
 import { defaultSelection, readSelection, selectionFromUrl, selectionParams, shuffled, type StudySelection } from "@/lib/study-selection";
 import type { CardImage } from "@/components/card-image";
+import { SourceButton } from "@/components/card-source";
 
 type CardData = { id: number; deck_id: number; deck_title: string; question: string; answer: string; quiz_ready: boolean; labels: string[]; due_at: string | null; status: "new" | "due" | "upcoming"; images?: CardImage[] };
 type Queue = { cards: CardData[]; total: number };
@@ -305,7 +306,7 @@ function Study() {
     function onKeyDown(event: KeyboardEvent) {
       if (event.defaultPrevented || event.repeat || event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
       // Leave typing, number inputs, and custom form controls to the browser.
-      if (event.target instanceof Element && event.target.closest("input, textarea, select, [contenteditable]:not([contenteditable='false']), [role='textbox'], [role='combobox'], [role='spinbutton'], [role='slider']")) return;
+      if (event.target instanceof Element && event.target.closest("input, textarea, select, [contenteditable]:not([contenteditable='false']), [role='textbox'], [role='combobox'], [role='spinbutton'], [role='slider'], [role='dialog']")) return;
       const rating = /^[1-4]$/.test(event.key) ? ratings[Number(event.key) - 1] : undefined;
       if (!rating || lock.current) return;
       event.preventDefault();
@@ -338,6 +339,7 @@ function Study() {
             </span>
             <span className="text-center text-sm text-accent">{flipped ? "Show question ↻" : "Show answer ↻"}</span></Card>
         </button>
+        {flipped && <div className="mt-4 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-center"><SourceButton key={card.id} cardId={card.id} /><span className="text-xs text-gray-500">Got it wrong? See the part of your notes it came from.</span></div>}
         {!flipped ? <button disabled={saving} onClick={() => setFlipped(true)} className={`mt-5 w-full ${btnPrimary}`}>Show answer</button> : mode !== "due" ? <button className={`mt-5 w-full ${btnPrimary}`} onClick={() => { setFlipped(false); setIndex((value) => value + 1); }}>Next card →</button> : <div className="mt-6">
           <div className="grid grid-cols-4 gap-2">{ratings.map((rating, i) => <button key={rating} disabled={saving || conflict} aria-keyshortcuts={String(i + 1)} title={`${rating} (press ${i + 1})`} onClick={() => void rate(rating)} className="flex flex-col items-center gap-1.5 rounded-xl border border-gray-300 bg-white px-2 py-3 text-center text-sm font-semibold transition-colors hover:border-accent hover:bg-blue-50 focus-visible:border-accent disabled:cursor-not-allowed disabled:opacity-50 sm:text-base"><kbd aria-hidden="true" className="inline-flex h-6 min-w-6 items-center justify-center rounded-md border border-gray-200 bg-gray-50 px-1 font-sans text-xs text-gray-600">{i + 1}</kbd><span>{rating}</span></button>)}</div>
           <p className="mt-3 text-center text-xs text-gray-500">Press 1–4 to rate this card.</p>

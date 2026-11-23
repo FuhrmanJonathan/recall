@@ -20,6 +20,7 @@ from app.sharing import router as sharing_router
 from app.csv_transfer import router as csv_router
 from app.images import router as images_router 
 from app.tagging import router as tagging_router
+from app.sources import router as sources_router
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -42,6 +43,7 @@ app.include_router(csv_router)
 
 app.include_router(images_router)
 app.include_router(tagging_router)
+app.include_router(sources_router)
 
 class TextIn(BaseModel):
     text: str

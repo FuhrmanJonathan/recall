@@ -90,6 +90,25 @@ class Deck(TimestampMixin, Base):
         back_populates="deck", cascade="all, delete-orphan")
     labels: Mapped[list["DeckLabel"]] = relationship(
         cascade="all, delete-orphan", passive_deletes=True, lazy="selectin")
+    source: Mapped["DeckSource | None"] = relationship(
+        cascade="all, delete-orphan", passive_deletes=True)
+
+
+class DeckSource(Base):
+    """The notes a generated deck was made from, kept so cards can point back into them.
+
+    Text and Word notes keep their cleaned text. PDFs and photos keep the original file
+    (served by GET /api/decks/{id}/source/file) because the model read those directly.
+    """
+    __tablename__ = "deck_sources"
+
+    deck_id: Mapped[int] = mapped_column(
+        ForeignKey("decks.id", ondelete="CASCADE"), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(10))  # "text", "docx", "pdf" or "image"
+    filename: Mapped[str] = mapped_column(String(255), default="")
+    text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, deferred=True)
 
 
 class Flashcard(TimestampMixin, Base):
@@ -105,6 +124,11 @@ class Flashcard(TimestampMixin, Base):
     # Key term hidden in the fill-in-the-blank quiz, picked when the card was generated.
     # Cards without a valid saved blank cannot be used in a quiz.
     cloze_blank: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Word-for-word passage of the uploaded notes this card was generated from, so a
+    # student who misses the card can jump back to it. None for hand-made/older cards.
+    source_excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 1-based PDF page of the excerpt, when known.
+    source_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     deck: Mapped[Deck] = relationship(back_populates="flashcards")
     quiz_question: Mapped["QuizQuestion | None"] = relationship(

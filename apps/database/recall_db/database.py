@@ -47,7 +47,12 @@ def create_tables(target_engine: Engine = engine) -> None:
 # first release are added here for databases created before them (SQLite only).
 _ADDED_COLUMNS: dict[str, dict[str, str]] = {
     "card_labels": {"color": "VARCHAR(20) NOT NULL DEFAULT 'blue'"},
-    "flashcards": {"needs_review": "BOOLEAN NOT NULL DEFAULT 0", "cloze_blank": "TEXT"},
+    "flashcards": {
+        "needs_review": "BOOLEAN NOT NULL DEFAULT 0",
+        "cloze_blank": "TEXT",
+        "source_excerpt": "TEXT",
+        "source_page": "INTEGER",
+    },
     "decks": {
         "version": "INTEGER NOT NULL DEFAULT 1",
         "is_public": "BOOLEAN NOT NULL DEFAULT 0",

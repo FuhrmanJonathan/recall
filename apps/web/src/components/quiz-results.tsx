@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Card, btnPrimary, btnSecondary } from "@/components/ui";
 import type { QuizRun } from "@/lib/quiz-session";
+import { SourceButton } from "@/components/card-source";
 
 function OriginalCard({ cardId }: { cardId: number }) {
   const [card, setCard] = useState<{ card_question: string; card_answer: string } | null>(null);
@@ -29,10 +30,13 @@ function OriginalCard({ cardId }: { cardId: number }) {
     }
   }
   return <div className="mt-4">
-    <button type="button" aria-expanded={!!card} disabled={loading} className={btnSecondary}
-      onClick={() => card ? setCard(null) : void open()}>
-      {loading ? "Loading flashcard…" : card ? "Hide flashcard" : "View flashcard"}
-    </button>
+    <div className="flex flex-wrap items-center gap-3">
+      <button type="button" aria-expanded={!!card} disabled={loading} className={btnSecondary}
+        onClick={() => card ? setCard(null) : void open()}>
+        {loading ? "Loading flashcard…" : card ? "Hide flashcard" : "View flashcard"}
+      </button>
+      <SourceButton cardId={cardId} />
+    </div>
     {error && <p role="status" className="mt-2 text-sm text-gray-600">{error}</p>}
     {card && <div className="mt-3 rounded-lg bg-gray-50 p-4 whitespace-pre-wrap break-words">
       <p className="font-semibold">{card.card_question}</p>
